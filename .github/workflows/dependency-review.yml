@@ -1,0 +1,26 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [ 'main' ]
+
+# advice on permissions from https://github.com/ossf/scorecard-action
+permissions:
+  # Required when publishing results (badge / API / code scanning)
+  security-events: write
+  id-token: write
+  # Recommended reads for private repos to avoid GraphQL/SAST gaps
+  contents: read
+  issues: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Dependency Review'
+        uses: actions/dependency-review-action@v4
+        with:
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 600
