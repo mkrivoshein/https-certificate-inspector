@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: https-certificate-inspector
+server:
+  port: 8001
+management:
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4317
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"

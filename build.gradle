@@ -49,6 +49,7 @@ dependencies {
 
     // Observability and monitoring
     implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+	implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
     //TODO: add implementation 'io.micrometer:micrometer-registry-prometheus' // For Prometheus metrics
 
     implementation 'dnsjava:dnsjava'
