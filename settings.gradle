@@ -1,0 +1,27 @@
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
+plugins {
+    id 'org.ajoberstar.reckon.settings' version '1.0.1'
+}
+
+rootProject.name = 'https-certificate-inspector'
+
+reckon {
+    defaultInferredScope = 'patch'
+    stages('rc', 'final')
+
+    // how do you calculate the scope/stage
+    scopeCalc = calcScopeFromProp().or(calcScopeFromCommitMessages()) // fall back to commit message (see below) if no explicit prop set
+    stageCalc = calcStageFromProp()
+    tagWriter = version -> "v" + version
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven { url "https://repo.spring.io/libs-release" }
+        mavenCentral()
+        maven { url "https://repo.spring.io/milestone/" }
+        //google()
+    }
+}

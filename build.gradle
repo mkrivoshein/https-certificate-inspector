@@ -1,0 +1,128 @@
+buildscript {
+	repositories {
+		maven { url "https://plugins.gradle.org/m2/" }
+		maven { url "https://repo.spring.io/libs-release/" }
+		mavenCentral()
+		maven { url "https://repo.spring.io/milestone/" }
+		maven { url "https://ajoberstar.org/bintray-backup/" }
+	}
+}
+
+plugins {
+	id 'org.springframework.boot' version '4.0.1'
+	id "io.spring.dependency-management" version "1.1.7"
+	id 'com.google.cloud.tools.jib' version '3.5.1'
+	id 'java'
+	id "application"
+}
+
+group = 'io.dnsmonitor.dns'
+
+ext {
+	set('spring-framework.version', '7.0.2')
+	set('spring-cloud.version', "2025.1.0")
+	set('tomcat.version', '11.0.15')
+	set('micrometer.version', "1.16.1")
+	set('micrometer-tracing.version', "1.6.1")
+	set('opentelemetry.version', "1.57.0")
+
+	set('commons-text.version', '1.15.0')
+	set('commons-lang3.version', '3.20.0')
+	set('slf4j.version', '2.0.17')
+
+	set('junit-jupiter.version', '6.0.1')
+}
+
+application {
+	mainClass.set("org.agencyapi.x509.inspector.CertificateInspector")
+}
+
+jar {
+	enabled = false
+}
+
+dependencies {
+	// Spring Boot starters
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Observability and monitoring
+    implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+    //TODO: add implementation 'io.micrometer:micrometer-registry-prometheus' // For Prometheus metrics
+
+    implementation 'dnsjava:dnsjava'
+    implementation 'org.apache.commons:commons-text'
+	implementation 'org.apache.commons:commons-lang3'
+
+	implementation 'com.google.guava:guava:33.5.0-jre'
+
+    // Annotations for static analysis
+    implementation 'com.github.spotbugs:spotbugs-annotations:4.9.4' // Modern replacement for JSR305
+    compileOnly 'org.jetbrains:annotations:24.1.0' // JetBrains annotations for better IDE support
+
+    // Test dependencies
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation('org.springframework.boot:spring-boot-starter-test') {
+		exclude group: 'org.junit.vintage', module: 'junit-vintage-engine'
+	}
+
+	// Test runtime
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+dependencyManagement {dm ->
+	applyMavenExclusions = false
+	imports {
+		mavenBom "org.springframework:spring-framework-bom:${ext.get('spring-framework.version')}"
+		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${ext.get('spring-cloud.version')}"
+		mavenBom "io.opentelemetry:opentelemetry-bom:${ext.get('opentelemetry.version')}"
+		mavenBom "io.micrometer:micrometer-bom:${ext.get('micrometer.version')}"
+		mavenBom "io.micrometer:micrometer-tracing-bom:${ext.get('micrometer-tracing.version')}"
+	}
+	dependencies {
+		dependency 'dnsjava:dnsjava:3.6.3'
+		dependency "org.apache.commons:commons-text:${ext.get('commons-text.version')}"
+		dependency "org.apache.commons:commons-lang3:${ext.get('commons-lang3.version')}"
+	}
+}
+
+
+
+java {
+	sourceCompatibility = 25
+	targetCompatibility = 25
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+		vendor = JvmVendorSpec.ADOPTIUM
+	}
+}
+
+test {
+	useJUnitPlatform()
+}
+
+jib {
+	from {
+		image = 'eclipse-temurin:25-noble' // Noble = Ubuntu 24.04 LTS
+	}
+	to {
+		image = 'europe-docker.pkg.dev/agencyapi/containers/https-certificate-inspector'
+		project.afterEvaluate {
+			def reconVersion = version.toString()
+			if (!reconVersion.contains("-rc")) {
+				tags = [version.toString(), 'latest']
+			} else {
+				tags = ['latest']
+			}
+		}
+	}
+	container {
+		mainClass = "org.agencyapi.x509.inspector.CertificateInspector"
+		ports = ['8001']
+		format = 'OCI'
+
+		creationTime = 'USE_CURRENT_TIMESTAMP'
+	}
+	allowInsecureRegistries = false
+}
