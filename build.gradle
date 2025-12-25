@@ -16,7 +16,7 @@ plugins {
 	id "application"
 }
 
-group = 'io.dnsmonitor.dns'
+group = 'org.agencyapi'
 
 ext {
 	set('spring-framework.version', '7.0.2')
