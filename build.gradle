@@ -82,7 +82,7 @@ dependencyManagement {dm ->
 		mavenBom "io.micrometer:micrometer-tracing-bom:${ext.get('micrometer-tracing.version')}"
 	}
 	dependencies {
-		dependency 'dnsjava:dnsjava:3.6.3'
+		dependency 'dnsjava:dnsjava:3.6.4'
 		dependency "org.apache.commons:commons-text:${ext.get('commons-text.version')}"
 		dependency "org.apache.commons:commons-lang3:${ext.get('commons-lang3.version')}"
 	}
