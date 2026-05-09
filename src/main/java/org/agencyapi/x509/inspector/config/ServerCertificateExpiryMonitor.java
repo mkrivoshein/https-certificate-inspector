@@ -106,7 +106,7 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            logger.debug("Skipping {} expiry check during shutdown.", description, e);
+            logger.debug("Skipping {} expiry check due to thread interruption.", description, e);
         } catch (Exception e) {
             if (Thread.currentThread().isInterrupted() || isShuttingDown()) {
                 logger.debug("Skipping {} expiry check during shutdown.", description, e);

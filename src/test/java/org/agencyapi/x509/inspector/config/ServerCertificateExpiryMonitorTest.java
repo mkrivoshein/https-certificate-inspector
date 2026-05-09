@@ -43,13 +43,10 @@ class ServerCertificateExpiryMonitorTest {
         var executorService = Executors.newSingleThreadScheduledExecutor();
         executorService.shutdownNow();
         ReflectionTestUtils.setField(monitor, "executorService", executorService);
-        try {
-            monitor.checkCertificate("ignored", "server TLS certificate", true);
 
-            assertThat(monitor.exitCalled).isFalse();
-        } finally {
-            executorService.shutdownNow();
-        }
+        monitor.checkCertificate("ignored", "server TLS certificate", true);
+
+        assertThat(monitor.exitCalled).isFalse();
     }
 
     private static final class TestableServerCertificateExpiryMonitor extends ServerCertificateExpiryMonitor {
