@@ -80,6 +80,9 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
     }
 
     private void checkCertificates(String certificateLocation, String clientCaLocation) {
+        if (isShuttingDown()) {
+            return;
+        }
         if (StringUtils.hasText(certificateLocation)) {
             checkCertificate(certificateLocation, "server TLS certificate", true);
         }
@@ -88,7 +91,7 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
         }
     }
 
-    private void checkCertificate(String certificateLocation, String description, boolean firstCertificateOnly) {
+    void checkCertificate(String certificateLocation, String description, boolean firstCertificateOnly) {
         try {
             for (var certificate : loadCertificates(certificateLocation, firstCertificateOnly)) {
                 var expiresAt = certificate.getNotAfter().toInstant();
@@ -101,13 +104,20 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
                     logger.debug("{} expires at {}", description, expiresAt);
                 }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.debug("Skipping {} expiry check during shutdown.", description, e);
         } catch (Exception e) {
+            if (Thread.currentThread().isInterrupted() || isShuttingDown()) {
+                logger.debug("Skipping {} expiry check during shutdown.", description, e);
+                return;
+            }
             logger.error("Unable to verify {} expiry. Exiting.", description, e);
             exitApplication();
         }
     }
 
-    private List<X509Certificate> loadCertificates(String certificateLocation, boolean firstCertificateOnly) throws Exception {
+    List<X509Certificate> loadCertificates(String certificateLocation, boolean firstCertificateOnly) throws Exception {
         var resourceLocation = TlsConfigurationProperties.normalizeResourceLocation(certificateLocation);
         var resource = resourceLoader.getResource(resourceLocation);
         try (InputStream inputStream = resource.getInputStream()) {
@@ -129,9 +139,13 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
         }
     }
 
-    private void exitApplication() {
+    void exitApplication() {
         var exitCode = SpringApplication.exit(applicationContext, () -> 1);
         System.exit(exitCode);
+    }
+
+    private boolean isShuttingDown() {
+        return executorService != null && executorService.isShutdown();
     }
 
     static ThreadFactory certificateMonitorThreadFactory() {

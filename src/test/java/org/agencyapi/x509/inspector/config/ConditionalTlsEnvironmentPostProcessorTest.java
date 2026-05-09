@@ -81,4 +81,17 @@ class ConditionalTlsEnvironmentPostProcessorTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Both inspector.tls.certificate and inspector.tls.private-key");
     }
+
+    @Test
+    void rejectsPlainHttpTlsMaterialLocations() {
+        var environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of(
+                "inspector.tls.certificate", "http://example.test/server.crt",
+                "inspector.tls.private-key", "/run/tls/server.key"
+        )));
+
+        assertThatThrownBy(() -> postProcessor.postProcessEnvironment(environment, new SpringApplication()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Plain HTTP TLS material locations are not supported");
+    }
 }

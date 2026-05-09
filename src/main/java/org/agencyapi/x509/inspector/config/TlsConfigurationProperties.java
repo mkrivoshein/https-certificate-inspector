@@ -41,9 +41,12 @@ final class TlsConfigurationProperties {
     }
 
     static String normalizeResourceLocation(String location) {
+        if (location.startsWith("http:")) {
+            throw new IllegalArgumentException("Plain HTTP TLS material locations are not supported: " + location);
+        }
+
         if (location.startsWith("classpath:")
                 || location.startsWith("file:")
-                || location.startsWith("http:")
                 || location.startsWith("https:")) {
             return location;
         }
