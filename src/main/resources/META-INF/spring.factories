@@ -1,0 +1,2 @@
+org.springframework.boot.EnvironmentPostProcessor=\
+org.agencyapi.x509.inspector.config.ConditionalTlsEnvironmentPostProcessor

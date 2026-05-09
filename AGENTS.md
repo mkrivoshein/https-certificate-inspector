@@ -14,9 +14,24 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `CertificateFetcher.java` / `CertificateUtils.java` / `IpUtils.java` | Certificate retrieval and helpers. |
 | `OpenTelemetryConfig.java` | Tracing wiring. |
 | `validators/` | Jakarta `ConstraintValidator` implementations (e.g. `@Domain`). |
+| `config/ConditionalTlsEnvironmentPostProcessor.java` | Flips Spring's HTTPS/mTLS settings on at startup if TLS properties are supplied. |
+| `config/ServerCertificateExpiryMonitor.java` | Daemon that exits the app if any TLS cert is within 10 min of expiry. |
+| `config/TlsConfigurationProperties.java` | Package-private helper resolving `inspector.tls.*` from properties or env vars. |
 | `src/main/resources/application.yml` | Port `8001`, OTLP endpoint, log pattern with `traceId`/`spanId`. |
+| `src/main/resources/META-INF/spring.factories` | Registers `ConditionalTlsEnvironmentPostProcessor`. |
 
-There is no `src/test/` yet — when adding tests, use JUnit 5 (already on the classpath via `spring-boot-starter-test`).
+Tests live under `src/test/java/org/agencyapi/x509/inspector/` and use JUnit 5 + AssertJ (transitively from `spring-boot-starter-test`).
+
+## HTTP, HTTPS, and mTLS
+
+Plain HTTP when no TLS settings are present. Supplying both a server certificate and private key enables HTTPS; adding a client CA enables mTLS (`server.ssl.client-auth=need`). See README "HTTPS and mTLS" for the property/env table and examples.
+
+When changing this code, keep the following invariants:
+
+- The post-processor must throw `IllegalStateException` if `certificate` or `private-key` is missing while any TLS setting is present — partial TLS config is never silently ignored.
+- The Spring SSL bundle name is `inspector` (`spring.ssl.bundle.pem.inspector.*`); changing it requires updating tests and any external SSL bundle references.
+- `ServerCertificateExpiryMonitor` must call `System.exit` (via `SpringApplication.exit`) — graceful return defeats the container-restart-on-expiry contract.
+- Don't commit certificates, private keys, or CA material to the repository.
 
 ## Coding conventions
 
