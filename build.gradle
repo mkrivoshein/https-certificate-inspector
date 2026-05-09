@@ -9,7 +9,7 @@ buildscript {
 }
 
 plugins {
-	id 'org.springframework.boot' version '4.0.2'
+	id 'org.springframework.boot' version '4.0.6'
 	id "io.spring.dependency-management" version "1.1.7"
 	id 'com.google.cloud.tools.jib' version '3.5.3'
 	id 'java'
@@ -19,18 +19,18 @@ plugins {
 group = 'org.agencyapi'
 
 ext {
-	set('spring-framework.version', '7.0.2')
+	set('spring-framework.version', '7.0.7')
 	set('spring-cloud.version', "2025.1.0")
-	set('tomcat.version', '11.0.15')
-	set('micrometer.version', "1.16.1")
-	set('micrometer-tracing.version', "1.6.1")
+	set('tomcat.version', '11.0.21')
+	set('micrometer.version', "1.16.5")
+	set('micrometer-tracing.version', "1.6.5")
 	set('opentelemetry.version', "1.57.0")
 
 	set('commons-text.version', '1.15.0')
 	set('commons-lang3.version', '3.20.0')
 	set('slf4j.version', '2.0.17')
 
-	set('junit-jupiter.version', '6.0.1')
+	set('junit-jupiter.version', '6.0.3')
 }
 
 application {
