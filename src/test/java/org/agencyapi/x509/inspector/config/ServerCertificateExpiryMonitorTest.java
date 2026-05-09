@@ -5,6 +5,7 @@ import org.springframework.context.support.StaticApplicationContext;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.security.cert.X509Certificate;
 import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -59,7 +60,7 @@ class ServerCertificateExpiryMonitorTest {
         }
 
         @Override
-        List<java.security.cert.X509Certificate> loadCertificates(String certificateLocation, boolean firstCertificateOnly) throws Exception {
+        List<X509Certificate> loadCertificates(String certificateLocation, boolean firstCertificateOnly) throws Exception {
             throw failure;
         }
 
