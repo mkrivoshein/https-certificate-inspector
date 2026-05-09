@@ -45,11 +45,11 @@ curl http://localhost:8001/inspect/example.com
 }
 ```
 
-Invalid domains return `400 Bad Request`.
+Requests that fail domain validation return `400 Bad Request`.
 
 ## Observability
 
-Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Spans are exported via OTLP to `http://localhost:4317` by default (see `src/main/resources/application.yml`). Trace and span IDs are included in every log line.
+Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Trace and span IDs are included in every log line. This README does not guarantee that spans are exported via OTLP by default; verify the runtime OpenTelemetry exporter configuration before relying on remote span export.
 
 ## Container image
 

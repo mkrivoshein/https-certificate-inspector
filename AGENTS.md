@@ -41,5 +41,5 @@ Secrets (`GOOGLE_CREDENTIALS`, etc.) live in GitHub Actions — never hard-code 
 ## Things to leave alone unless asked
 
 - The Artifact Registry coordinates and Jib `to.image` in `build.gradle`.
-- The OTLP endpoint default in `application.yml` (`http://localhost:4317`) — it's intentional for local dev.
+- The OTLP endpoint default in `application.yml` (`http://localhost:4317`) — keep this local-dev/default endpoint as configured, but do not assume it means OTLP span exporting is wired by default.
 - Port `8001` — referenced from the container config and external callers.
