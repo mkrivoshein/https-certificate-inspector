@@ -1,17 +1,18 @@
 package org.agencyapi.x509.inspector;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
+import javax.net.ssl.*;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
@@ -22,6 +23,7 @@ import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
 
 @Component
 public class CertificateFetcher {
+    private static final Logger logger = LoggerFactory.getLogger(CertificateFetcher.class);
     /**
      * Sends an HTTP HEAD request and retrieves the SSL/TLS certificate(s)
      * @param urlString The URL to connect to (must be HTTPS)
@@ -121,21 +123,60 @@ public class CertificateFetcher {
     }
 
     /**
+     * Checks whether the server has OCSP Stapling enabled by examining the TLS handshake.
+     * Returns false (rather than throwing) if the check cannot be completed.
+     * @param host The hostname to connect to
+     * @param port The port to connect to (typically 443)
+     * @param trustAllCerts Whether to skip certificate validation
+     * @return true if the server sends an OCSP stapling response during the TLS handshake
+     */
+    public boolean checkOcspStapling(String host, int port, boolean trustAllCerts) {
+        try {
+            SSLContext sslContext;
+            if (trustAllCerts) {
+                sslContext = SSLContext.getInstance("TLS");
+                sslContext.init(null, buildTrustAllManagers(), new SecureRandom());
+            } else {
+                sslContext = SSLContext.getDefault();
+            }
+
+            try (SSLSocket sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket()) {
+                SSLParameters params = sslSocket.getSSLParameters();
+                params.setServerNames(List.of(new SNIHostName(host)));
+                sslSocket.setSSLParameters(params);
+
+                sslSocket.connect(new InetSocketAddress(host, port), 5000);
+                sslSocket.setSoTimeout(5000);
+                sslSocket.startHandshake();
+
+                SSLSession session = sslSocket.getSession();
+                if (session instanceof ExtendedSSLSession extSession) {
+                    return !extSession.getStatusResponses().isEmpty();
+                }
+                return false;
+            }
+        } catch (Exception e) {
+            logger.debug("OCSP stapling check failed for {}:{}: {}", host, port, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Sets up SSL context to trust all certificates
      */
     private void setupTrustAllCerts(HttpsURLConnection connection) throws NoSuchAlgorithmException, KeyManagementException {
-        TrustManager[] trustAllManager = new TrustManager[]{
+        var sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(null, buildTrustAllManagers(), new java.security.SecureRandom());
+        connection.setSSLSocketFactory(sslContext.getSocketFactory());
+    }
+
+    private TrustManager[] buildTrustAllManagers() {
+        return new TrustManager[]{
                 new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() {
-                        return null;
-                    }
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
                     public void checkClientTrusted(X509Certificate[] certs, String authType) {}
                     public void checkServerTrusted(X509Certificate[] certs, String authType) {}
                 }
         };
-
-        var sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, trustAllManager, new java.security.SecureRandom());
-        connection.setSSLSocketFactory(sslContext.getSocketFactory());
     }
 }
