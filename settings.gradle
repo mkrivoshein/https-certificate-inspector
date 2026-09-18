@@ -1,7 +1,7 @@
 import org.gradle.api.initialization.resolve.RepositoriesMode
 
 plugins {
-    id 'org.ajoberstar.reckon.settings' version '1.0.1'
+    id 'org.ajoberstar.reckon.settings' version '2.0.0'
 }
 
 rootProject.name = 'https-certificate-inspector'
