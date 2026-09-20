@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: 'Dependency Review'
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 600

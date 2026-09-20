@@ -18,7 +18,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: 'actions/checkout@v4'
+      - uses: 'actions/checkout@v7'
       - id: 'auth'
         name: 'Authenticate to Google Cloud'
         uses: 'google-github-actions/auth@v2'
@@ -29,7 +29,7 @@ jobs:
           access_token_lifetime: '600s' # 10 minutes should be long enough
           create_credentials_file: false
       - name: Set up JDK
-        uses: actions/setup-java@v4.3.0
+        uses: actions/setup-java@v6
         with:
           distribution: 'adopt'
           java-version-file: '.tool-versions'
