@@ -1,6 +1,11 @@
 # https-certificate-inspector
 
-A small Spring Boot service that fetches the X.509 certificate chain presented by an HTTPS endpoint and returns key facts about each certificate as JSON.
+A small Spring Boot service that connects to an HTTPS endpoint, reads the X.509 certificates it presents, and returns key facts about them as JSON. It offers two APIs:
+
+- `/inspect/{domain}`: the full certificate chain, in this service's own format.
+- `/v1/domain/{hostname}/ssl`: the domain's certificate in the same format as SecurityTrails' Get Domain SSL API, so SecurityTrails clients can switch to this service by changing their base URL.
+
+Certificates are read live on every request; the service keeps no history.
 
 ## Requirements
 
@@ -16,14 +21,17 @@ A small Spring Boot service that fetches the X.509 certificate chain presented b
 
 ## API
 
-| Method | Path                | Description                                                                                |
-|--------|---------------------|--------------------------------------------------------------------------------------------|
-| GET    | `/inspect/{domain}` | Connects to `https://{domain}` and returns the certificate chain. `{domain}` is validated. |
-| GET    | `/v1/domain/{hostname}/ssl` | SecurityTrails-compatible certificate lookup (see below). `/v1/domain/{hostname}/tls` is an alias. |
-| GET    | `/health`           | Liveness probe; returns `OK`.                                                              |
-| GET    | `/actuator/**`      | Spring Boot Actuator endpoints.                                                            |
+| Method | Path                        | Description                                                                                       |
+|--------|-----------------------------|---------------------------------------------------------------------------------------------------|
+| GET    | `/inspect/{domain}`         | Connects to `https://{domain}` and returns the certificate chain. `{domain}` is validated.        |
+| GET    | `/v1/domain/{hostname}/ssl` | SecurityTrails-compatible lookup of the domain's certificate (see below).                         |
+| GET    | `/v1/domain/{hostname}/tls` | Alias of `/v1/domain/{hostname}/ssl`; same response.                                              |
+| GET    | `/health`                   | Liveness probe; returns `OK`.                                                                     |
+| GET    | `/actuator/**`              | Spring Boot Actuator endpoints.                                                                   |
 
-### Example
+### `/inspect/{domain}`
+
+Returns every certificate the server presents (the domain's certificate followed by any intermediates).
 
 ```bash
 curl http://localhost:8001/inspect/example.com
@@ -46,9 +54,9 @@ curl http://localhost:8001/inspect/example.com
 }
 ```
 
-Requests that fail domain validation return `400 Bad Request`.
+Requests that fail domain validation return `400 Bad Request` with a plain-text message.
 
-### SecurityTrails-compatible endpoint
+### `/v1/domain/{hostname}/ssl` (SecurityTrails-compatible)
 
 `GET /v1/domain/{hostname}/ssl` mirrors SecurityTrails' [Get Domain SSL](https://docs.securitytrails.com/) API, so a SecurityTrails client can switch by changing its base URL from `https://api.securitytrails.com/v1` to `http://<host>:8001/v1`. `GET /v1/domain/{hostname}/tls` returns the same response.
 
@@ -93,7 +101,7 @@ This service **keeps no history**: it does a live TLS handshake and only sees th
 
 ## Observability
 
-Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Trace and span IDs are included in every log line. This README does not guarantee that spans are exported via OTLP by default; verify the runtime OpenTelemetry exporter configuration before relying on remote span export.
+Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Each request runs in its own span (`inspect` for `/inspect/{domain}`, `domain-ssl` for `/v1/domain/{hostname}/ssl` and `/tls`), and trace and span IDs are included in every log line. This README does not guarantee that spans are exported via OTLP by default; verify the runtime OpenTelemetry exporter configuration before relying on remote span export.
 
 ## Container image
 
