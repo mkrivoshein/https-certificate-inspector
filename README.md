@@ -19,6 +19,7 @@ A small Spring Boot service that fetches the X.509 certificate chain presented b
 | Method | Path                | Description                                                                                |
 |--------|---------------------|--------------------------------------------------------------------------------------------|
 | GET    | `/inspect/{domain}` | Connects to `https://{domain}` and returns the certificate chain. `{domain}` is validated. |
+| GET    | `/v1/domain/{hostname}/ssl` | SecurityTrails-compatible certificate lookup (see below). `/v1/domain/{hostname}/tls` is an alias. |
 | GET    | `/health`           | Liveness probe; returns `OK`.                                                              |
 | GET    | `/actuator/**`      | Spring Boot Actuator endpoints.                                                            |
 
@@ -46,6 +47,49 @@ curl http://localhost:8001/inspect/example.com
 ```
 
 Requests that fail domain validation return `400 Bad Request`.
+
+### SecurityTrails-compatible endpoint
+
+`GET /v1/domain/{hostname}/ssl` mirrors SecurityTrails' [Get Domain SSL](https://docs.securitytrails.com/) API, so a SecurityTrails client can switch by changing its base URL from `https://api.securitytrails.com/v1` to `http://<host>:8001/v1`. `GET /v1/domain/{hostname}/tls` returns the same response.
+
+```bash
+curl "http://localhost:8001/v1/domain/example.com/ssl?apikey=ignored"
+```
+
+```json
+{
+  "endpoint": "/v1/domain/example.com/ssl",
+  "meta": {
+    "max_page": 1,
+    "page": 1,
+    "query": {"apikey": "********", "domain": "example.com", "include_subdomains": "False", "page": "1", "status": "valid"},
+    "total_pages": 1
+  },
+  "record_count": 1,
+  "records": [
+    {
+      "dns_names": ["*.example.com", "example.com"],
+      "fingerprints": {"sha1": "899CB259...", "sha256": "85CA6AB0..."},
+      "issuer": {"common_name": "...", "country": ["US"], "organization": ["..."]},
+      "not_after": 1798239395,
+      "not_before": 1790462951,
+      "serial_number": "2569673129085639595562975411803018896",
+      "subject": {"common_name": "example.com"}
+    }
+  ]
+}
+```
+
+This service **keeps no history**: it does a live TLS handshake and only sees the certificate the server presents right now. Compared to SecurityTrails:
+
+| Parameter / field    | Behaviour here                                                                                                   |
+|----------------------|------------------------------------------------------------------------------------------------------------------|
+| `apikey`             | Accepted and ignored (no authentication). Echoed as `********` in `meta.query`, never in clear.                  |
+| `status`             | `valid` (default), `expired`, `all`; applied to the live certificate only, so past certificates never appear.    |
+| `include_subdomains` | Only `false` is supported; `true` returns `400`.                                                                 |
+| `page`               | Query parameter or JSON body. There is at most one record, so page 1 holds it and later pages are empty.         |
+| `records`            | The leaf certificate, if it matches `{hostname}` (including wildcards) and `status`; otherwise empty.            |
+| Errors               | `400` for invalid input, `502` when the certificate can't be retrieved, `504` on timeout; all `{"message": ...}`. |
 
 ## Observability
 
