@@ -4,7 +4,7 @@ A small Spring Boot service that fetches the X.509 certificate chain presented b
 
 ## Requirements
 
-- Java 25 (BellSoft Liberica). The Gradle toolchain will download it automatically if it's not already available.
+- Java 25 (BellSoft Liberica). The build requires a BellSoft Java 25 toolchain; if none is installed, Gradle downloads one automatically into `~/.gradle/jdks` (via the [Foojay toolchain resolver](https://github.com/gradle/foojay-toolchains)). The first build then needs network access.
 
 ## Run locally
 
