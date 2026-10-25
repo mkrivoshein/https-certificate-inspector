@@ -19,9 +19,8 @@ public class CertificateUtils {
             if (sanCollection != null) {
                 for (var san : sanCollection) {
                     var type = (Integer) san.get(0);
-                    var value = (String) san.get(1);
-                    // Type 2 is DNS name
-                    if (type == 2 && matchesDomain(value, domainName)) {
+                    // Type 2 is DNS name; other types (e.g. otherName) can carry binary values
+                    if (type == 2 && san.get(1) instanceof String value && matchesDomain(value, domainName)) {
                         return true;
                     }
                 }

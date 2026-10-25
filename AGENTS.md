@@ -11,12 +11,13 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `CertificateInspector.java` | Spring Boot entry point. |
 | `CertificateInspectorController.java` | REST controller. Owns the `inspect` span and exception → 400 mapping. |
 | `CertificateInspectorReply.java` | Response record + nested `CertificateInfo` projection of `X509Certificate`. |
+| `DomainSslController.java` / `DomainSslReply.java` | SecurityTrails-compatible `/v1/domain/{hostname}/ssl` (and `/tls`) endpoint and its snake_case response records. Owns the `domain-ssl` span. |
 | `CertificateFetcher.java` / `CertificateUtils.java` / `IpUtils.java` | Certificate retrieval and helpers. |
 | `OpenTelemetryConfig.java` | Tracing wiring. |
 | `validators/` | Jakarta `ConstraintValidator` implementations (e.g. `@Domain`). |
 | `src/main/resources/application.yml` | Port `8001`, OTLP endpoint, log pattern with `traceId`/`spanId`. |
 
-There is no `src/test/` yet — when adding tests, use JUnit 5 (already on the classpath via `spring-boot-starter-test`).
+Tests live under `src/test/` and use JUnit 5 (via `spring-boot-starter-test`); fixture certificates are in `src/test/resources/certificates/`.
 
 ## Coding conventions
 
