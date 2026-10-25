@@ -3,9 +3,9 @@ package org.agencyapi.x509.inspector;
 import java.security.cert.X509Certificate;
 import java.util.List;
 
-public record CertificateInspectorReply(String domain, List<CertificateInfo> certificates) {
-    static CertificateInspectorReply create(String domain, List<X509Certificate> certificates) {
-        return new CertificateInspectorReply(domain, certificates.stream().map(CertificateInfo::from).toList());
+public record CertificateInspectorReply(String domain, boolean ocspStaplingEnabled, List<CertificateInfo> certificates) {
+    static CertificateInspectorReply create(String domain, List<X509Certificate> certificates, boolean ocspStaplingEnabled) {
+        return new CertificateInspectorReply(domain, ocspStaplingEnabled, certificates.stream().map(CertificateInfo::from).toList());
     }
     record CertificateInfo(
             String subject,
@@ -14,7 +14,8 @@ public record CertificateInspectorReply(String domain, List<CertificateInfo> cer
             String validFrom,
             String validUntil,
             String signatureAlgorithm,
-            int version) {
+            int version,
+            String ocspUrl) {
         static CertificateInfo from(X509Certificate cert) {
             return new CertificateInfo(
                     cert.getSubjectX500Principal().getName(),
@@ -23,7 +24,8 @@ public record CertificateInspectorReply(String domain, List<CertificateInfo> cer
                     cert.getNotBefore().toString(),
                     cert.getNotAfter().toString(),
                     cert.getSigAlgName(),
-                    cert.getVersion()
+                    cert.getVersion(),
+                    CertificateUtils.extractOcspUrl(cert)
             );
         }
     }

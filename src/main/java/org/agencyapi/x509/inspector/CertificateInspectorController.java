@@ -40,8 +40,9 @@ public class CertificateInspectorController {
         try (var withSpan = tracer.withSpan(newSpan.start())) {
             logger.info("SSL test query for {}", domain);
             var certificates = certificateFetcher.fetchCertificate("https://" + domain, true);
+            var ocspStaplingEnabled = certificateFetcher.checkOcspStapling(domain, 443, true);
             certificates.forEach(CertificateUtils::printCertificateDetails);
-            return CertificateInspectorReply.create(domain, certificates);
+            return CertificateInspectorReply.create(domain, certificates, ocspStaplingEnabled);
         } catch (IOException|URISyntaxException e) {
             throw new RuntimeException("Unable to handle SSL test for " + domain);
         } finally {
