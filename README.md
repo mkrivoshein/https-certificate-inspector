@@ -4,7 +4,7 @@ A small Spring Boot service that fetches the X.509 certificate chain presented b
 
 ## Requirements
 
-- Java 25 (Adoptium). The Gradle toolchain will download it automatically if it's not already available.
+- Java 25 (BellSoft Liberica). The Gradle toolchain will download it automatically if it's not already available.
 
 ## Run locally
 
@@ -53,7 +53,7 @@ Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Trace a
 
 ## Container image
 
-The image is built with [Jib](https://github.com/GoogleContainerTools/jib) on top of `eclipse-temurin:25-noble` and published by CI to:
+The image is built with [Jib](https://github.com/GoogleContainerTools/jib) on top of `bellsoft/liberica-runtime-container:jre-25-glibc` and published by CI to:
 
 ```
 europe-docker.pkg.dev/agencyapi/containers/https-certificate-inspector
