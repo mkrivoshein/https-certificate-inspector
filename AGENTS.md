@@ -11,6 +11,7 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `CertificateInspector.java` | Spring Boot entry point. |
 | `CertificateInspectorController.java` | REST controller. Owns the `inspect` span and exception → 400 mapping. |
 | `CertificateInspectorReply.java` | Response record + nested `CertificateInfo` projection of `X509Certificate`. |
+| `DomainSslController.java` / `DomainSslReply.java` | SecurityTrails-compatible `/v1/domain/{hostname}/ssl` (and `/tls`) endpoint and its snake_case response records. Owns the `domain-ssl` span. |
 | `CertificateFetcher.java` / `CertificateUtils.java` / `IpUtils.java` | Certificate retrieval and helpers. |
 | `OpenTelemetryConfig.java` | Tracing wiring. |
 | `validators/` | Jakarta `ConstraintValidator` implementations (e.g. `@Domain`). |
@@ -20,7 +21,7 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `src/main/resources/application.yml` | Port `8001`, OTLP endpoint, log pattern with `traceId`/`spanId`. |
 | `src/main/resources/META-INF/spring.factories` | Registers `ConditionalTlsEnvironmentPostProcessor`. |
 
-Tests live under `src/test/java/org/agencyapi/x509/inspector/` and use JUnit 5 + AssertJ (transitively from `spring-boot-starter-test`).
+Tests live under `src/test/` and use JUnit 5 + AssertJ (via `spring-boot-starter-test`); public fixture certificates for the inspection endpoints are in `src/test/resources/certificates/`.
 
 ## HTTP, HTTPS, and mTLS
 
@@ -33,7 +34,7 @@ When changing this code, keep the following invariants:
 - `ServerCertificateExpiryMonitor` reads certificates from `SslBundles`, never from disk, so it checks what the server is actually serving after a hot reload.
 - Filesystem TLS locations are normalized to absolute `file:` URIs, and `reload-on-update` is enabled only when every location is a `file:` URI (Spring Boot cannot watch `classpath:`/`https:` content).
 - `ServerCertificateExpiryMonitor` must call `System.exit` (via `SpringApplication.exit`) — graceful return defeats the container-restart-on-expiry contract.
-- Don't commit certificates, private keys, or CA material to the repository; tests generate throwaway material with the JDK's `keytool` into a JUnit `@TempDir`.
+- Don't commit private keys or real deployment TLS material. Public test certificates are fine; tests that need a key pair (e.g. the expiry monitor) generate throwaway material with the JDK's `keytool` into a JUnit `@TempDir`.
 
 ## Coding conventions
 
