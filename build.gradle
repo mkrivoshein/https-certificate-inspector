@@ -95,7 +95,7 @@ java {
 	targetCompatibility = 25
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(25)
-		vendor = JvmVendorSpec.ADOPTIUM
+		vendor = JvmVendorSpec.BELLSOFT
 	}
 }
 
@@ -105,7 +105,7 @@ test {
 
 jib {
 	from {
-		image = 'eclipse-temurin:25-noble' // Noble = Ubuntu 24.04 LTS
+		image = 'bellsoft/liberica-runtime-container:jre-25-glibc'
 	}
 	to {
 		image = 'europe-docker.pkg.dev/agencyapi/containers/https-certificate-inspector'
