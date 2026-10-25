@@ -17,8 +17,9 @@ import java.nio.file.Path;
 import java.security.cert.X509Certificate;
 import java.util.List;
 
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -74,12 +75,14 @@ class CertificateInspectorControllerTest {
     }
 
     @Test
-    void reportsOcspUrlPerCertificate() throws Exception {
+    void reportsOcspUrlPerCertificateAndOmitsItWhenAbsent() throws Exception {
         mockMvc.perform(get("/inspect/example.com"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.certificates", hasSize(2)))
                 .andExpect(jsonPath("$.certificates[0].ocspUrl").value(OCSP_URL))
-                .andExpect(jsonPath("$.certificates[1].ocspUrl", nullValue()));
+                // the key itself is left out, not sent as "ocspUrl": null
+                .andExpect(jsonPath("$.certificates[1]", not(hasKey("ocspUrl"))))
+                .andExpect(jsonPath("$.certificates[1].serialNumber").exists());
     }
 
     @Test

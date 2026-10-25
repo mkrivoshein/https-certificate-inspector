@@ -40,6 +40,7 @@ curl http://localhost:8001/inspect/example.com
 ```json
 {
   "domain": "example.com",
+  "ocspStaplingEnabled": false,
   "certificates": [
     {
       "subject": "CN=example.com,...",
@@ -48,11 +49,14 @@ curl http://localhost:8001/inspect/example.com
       "validFrom": "...",
       "validUntil": "...",
       "signatureAlgorithm": "SHA256withRSA",
-      "version": 3
+      "version": 3,
+      "ocspUrl": "http://ocsp.example.net"
     }
   ]
 }
 ```
+
+`ocspStaplingEnabled` is `true` when the server staples an OCSP response during the TLS handshake. It is also `false` when the check can't be completed. `ocspUrl` is the OCSP responder URL from the certificate's Authority Information Access extension, and is left out when the certificate has none (as with current Let's Encrypt certificates).
 
 Requests that fail domain validation return `400 Bad Request` with a plain-text message.
 

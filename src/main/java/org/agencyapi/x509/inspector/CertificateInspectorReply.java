@@ -1,5 +1,7 @@
 package org.agencyapi.x509.inspector;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.security.cert.X509Certificate;
 import java.util.List;
 
@@ -7,6 +9,8 @@ public record CertificateInspectorReply(String domain, boolean ocspStaplingEnabl
     static CertificateInspectorReply create(String domain, List<X509Certificate> certificates, boolean ocspStaplingEnabled) {
         return new CertificateInspectorReply(domain, ocspStaplingEnabled, certificates.stream().map(CertificateInfo::from).toList());
     }
+    // ocspUrl is the only optional field; leave it out rather than send "ocspUrl": null
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record CertificateInfo(
             String subject,
             String issuer,
