@@ -2,6 +2,7 @@ package org.agencyapi.x509.inspector.config;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -13,6 +14,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ConditionalTlsEnvironmentPostProcessorTest {
     private final ConditionalTlsEnvironmentPostProcessor postProcessor = new ConditionalTlsEnvironmentPostProcessor();
+
+    @Test
+    void runsAfterConfigDataIsLoaded() {
+        assertThat(postProcessor.getOrder()).isGreaterThan(ConfigDataEnvironmentPostProcessor.ORDER);
+    }
 
     @Test
     void leavesHttpEnabledWhenTlsCertificateAndKeyAreMissing() {

@@ -33,7 +33,7 @@ class ServerCertificateExpiryMonitorTest {
 
     /**
      * Generates throwaway TLS material with the JDK's keytool so no key material is committed.
-     * Expiry order: client CA (30 days) &lt; server (60 days) &lt; rotated server (90 days).
+     * Expiry order: client CA and intermediate (30 days) &lt; server and chained leaf (60 days) &lt; rotated server (90 days).
      */
     @BeforeAll
     static void generateTlsMaterial() throws Exception {
@@ -45,6 +45,19 @@ class ServerCertificateExpiryMonitorTest {
                 "-validity", "60");
         keytool("-genkeypair", "-keystore", "rotated-server.p12", "-alias", "server", "-dname", "CN=localhost",
                 "-validity", "90");
+
+        // Leaf signed by an intermediate that expires first.
+        keytool("-genkeypair", "-keystore", "intermediate.p12", "-alias", "intermediate", "-dname", "CN=Test Intermediate",
+                "-ext", "bc:c", "-validity", "30");
+        keytool("-exportcert", "-keystore", "intermediate.p12", "-alias", "intermediate", "-file", "intermediate.crt");
+        keytool("-genkeypair", "-keystore", "chained-server.p12", "-alias", "server", "-dname", "CN=localhost",
+                "-validity", "60");
+        keytool("-certreq", "-keystore", "chained-server.p12", "-alias", "server", "-file", "chained-server.csr");
+        keytool("-gencert", "-keystore", "intermediate.p12", "-alias", "intermediate", "-infile", "chained-server.csr",
+                "-outfile", "chained-server.crt", "-validity", "60");
+        keytool("-importcert", "-noprompt", "-keystore", "chained-server.p12", "-alias", "intermediate",
+                "-file", "intermediate.crt");
+        keytool("-importcert", "-keystore", "chained-server.p12", "-alias", "server", "-file", "chained-server.crt");
     }
 
     @Test
@@ -83,6 +96,21 @@ class ServerCertificateExpiryMonitorTest {
         var clientCaNotAfter = ServerCertificateExpiryMonitor.trustedCertificates(bundle.getStores().getTrustStore())
                 .getFirst().getNotAfter().toInstant();
         var monitor = monitor(new DefaultSslBundleRegistry(BUNDLE, bundle), clientCaNotAfter.minus(INSIDE_WINDOW));
+
+        monitor.checkCertificates();
+
+        assertThat(monitor.exitCalled).isTrue();
+    }
+
+    @Test
+    void exitsWhenIntermediateInServedChainIsWithinExitWindow() throws Exception {
+        var bundle = bundle("chained-server.p12", null);
+        var chain = ServerCertificateExpiryMonitor.serverCertificates(bundle.getStores().getKeyStore());
+        assertThat(chain).hasSize(2);
+        var leafNotAfter = chain.getFirst().getNotAfter().toInstant();
+        var intermediateNotAfter = chain.getLast().getNotAfter().toInstant();
+        assertThat(intermediateNotAfter).isBefore(leafNotAfter);
+        var monitor = monitor(new DefaultSslBundleRegistry(BUNDLE, bundle), intermediateNotAfter.minus(INSIDE_WINDOW));
 
         monitor.checkCertificates();
 

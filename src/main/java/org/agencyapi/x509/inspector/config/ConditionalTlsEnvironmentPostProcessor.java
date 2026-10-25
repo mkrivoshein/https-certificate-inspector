@@ -2,6 +2,7 @@ package org.agencyapi.x509.inspector.config;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.EnvironmentPostProcessor;
+import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
@@ -61,8 +62,12 @@ public class ConditionalTlsEnvironmentPostProcessor implements EnvironmentPostPr
         environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, properties));
     }
 
+    /**
+     * Runs after config data is loaded so {@code inspector.tls.*} from {@code application.yml}, profiles and
+     * config imports is visible; the derived properties are still added with the highest precedence.
+     */
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE;
+        return ConfigDataEnvironmentPostProcessor.ORDER + 1;
     }
 }

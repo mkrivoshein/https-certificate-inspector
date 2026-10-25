@@ -119,16 +119,17 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
     }
 
     /**
-     * Leaf certificate of each key entry, i.e. the certificate presented to clients.
+     * Every certificate in each key entry's chain, i.e. the leaf and any intermediates presented to clients.
      */
     static List<X509Certificate> serverCertificates(KeyStore keyStore) throws KeyStoreException {
         var certificates = new ArrayList<X509Certificate>();
         for (var alias : Collections.list(keyStore.aliases())) {
-            if (keyStore.isKeyEntry(alias)
-                    && keyStore.getCertificateChain(alias) instanceof Certificate[] chain
-                    && chain.length > 0
-                    && chain[0] instanceof X509Certificate leaf) {
-                certificates.add(leaf);
+            if (keyStore.isKeyEntry(alias) && keyStore.getCertificateChain(alias) instanceof Certificate[] chain) {
+                for (var certificate : chain) {
+                    if (certificate instanceof X509Certificate x509) {
+                        certificates.add(x509);
+                    }
+                }
             }
         }
         if (certificates.isEmpty()) {
