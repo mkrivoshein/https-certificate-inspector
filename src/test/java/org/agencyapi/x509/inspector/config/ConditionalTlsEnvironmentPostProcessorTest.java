@@ -5,6 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +41,40 @@ class ConditionalTlsEnvironmentPostProcessorTest {
         assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.keystore.private-key"))
                 .isEqualTo("file:///run/tls/server.key");
         assertThat(environment.getProperty("server.ssl.client-auth")).isNull();
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.reload-on-update")).isEqualTo("true");
+    }
+
+    @Test
+    void resolvesRelativePathsAgainstWorkingDirectory() {
+        var environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of(
+                "inspector.tls.certificate", "tls/server.crt",
+                "inspector.tls.private-key", "./tls/../tls/server.key"
+        )));
+
+        postProcessor.postProcessEnvironment(environment, new SpringApplication());
+
+        var workingDirectory = Path.of("").toAbsolutePath();
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.keystore.certificate"))
+                .isEqualTo(workingDirectory.resolve("tls/server.crt").toUri().toString());
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.keystore.private-key"))
+                .isEqualTo(workingDirectory.resolve("tls/server.key").toUri().toString());
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.reload-on-update")).isEqualTo("true");
+    }
+
+    @Test
+    void doesNotEnableReloadWhenMaterialIsNotOnFilesystem() {
+        var environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of(
+                "inspector.tls.certificate", "classpath:tls/server.crt",
+                "inspector.tls.private-key", "/run/tls/server.key"
+        )));
+
+        postProcessor.postProcessEnvironment(environment, new SpringApplication());
+
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.keystore.certificate"))
+                .isEqualTo("classpath:tls/server.crt");
+        assertThat(environment.getProperty("spring.ssl.bundle.pem.inspector.reload-on-update")).isNull();
     }
 
     @Test

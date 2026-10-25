@@ -6,6 +6,7 @@ import org.springframework.util.StringUtils;
 import java.nio.file.Path;
 
 final class TlsConfigurationProperties {
+    static final String BUNDLE_NAME = "inspector";
     static final String CERTIFICATE_PROPERTY = "inspector.tls.certificate";
     static final String CERTIFICATE_ENV = "INSPECTOR_TLS_CERTIFICATE";
     static final String CERTIFICATE_SHORT_ENV = "INSPECTOR_TLS_CERT";
@@ -45,17 +46,26 @@ final class TlsConfigurationProperties {
             throw new IllegalArgumentException("Plain HTTP TLS material locations are not supported: " + location);
         }
 
-        if (location.startsWith("classpath:")
+        if (isPemContent(location)
+                || location.startsWith("classpath:")
                 || location.startsWith("file:")
                 || location.startsWith("https:")) {
             return location;
         }
 
-        var path = Path.of(location);
-        if (path.isAbsolute()) {
-            return path.toUri().toString();
-        }
+        // Resolve plain paths against the working directory so every consumer sees the same file,
+        // regardless of which ResourceLoader it uses.
+        return Path.of(location).toAbsolutePath().normalize().toUri().toString();
+    }
 
-        return location;
+    /**
+     * Spring Boot can only watch TLS material for changes when it lives on the filesystem.
+     */
+    static boolean isWatchable(String normalizedLocation) {
+        return normalizedLocation.startsWith("file:");
+    }
+
+    private static boolean isPemContent(String location) {
+        return location.startsWith("-----BEGIN");
     }
 }

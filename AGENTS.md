@@ -15,7 +15,7 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `OpenTelemetryConfig.java` | Tracing wiring. |
 | `validators/` | Jakarta `ConstraintValidator` implementations (e.g. `@Domain`). |
 | `config/ConditionalTlsEnvironmentPostProcessor.java` | Flips Spring's HTTPS/mTLS settings on at startup if TLS properties are supplied. |
-| `config/ServerCertificateExpiryMonitor.java` | Daemon that exits the app if any TLS cert is within 10 min of expiry. |
+| `config/ServerCertificateExpiryMonitor.java` | Daemon that exits the app if any certificate in the live `inspector` SSL bundle is within 10 min of expiry. |
 | `config/TlsConfigurationProperties.java` | Package-private helper resolving `inspector.tls.*` from properties or env vars. |
 | `src/main/resources/application.yml` | Port `8001`, OTLP endpoint, log pattern with `traceId`/`spanId`. |
 | `src/main/resources/META-INF/spring.factories` | Registers `ConditionalTlsEnvironmentPostProcessor`. |
@@ -30,8 +30,10 @@ When changing this code, keep the following invariants:
 
 - The post-processor must throw `IllegalStateException` if `certificate` or `private-key` is missing while any TLS setting is present — partial TLS config is never silently ignored.
 - The Spring SSL bundle name is `inspector` (`spring.ssl.bundle.pem.inspector.*`); changing it requires updating tests and any external SSL bundle references.
+- `ServerCertificateExpiryMonitor` reads certificates from `SslBundles`, never from disk, so it checks what the server is actually serving after a hot reload.
+- Filesystem TLS locations are normalized to absolute `file:` URIs, and `reload-on-update` is enabled only when every location is a `file:` URI (Spring Boot cannot watch `classpath:`/`https:` content).
 - `ServerCertificateExpiryMonitor` must call `System.exit` (via `SpringApplication.exit`) — graceful return defeats the container-restart-on-expiry contract.
-- Don't commit certificates, private keys, or CA material to the repository.
+- Don't commit certificates, private keys, or CA material to the repository; tests generate throwaway material with the JDK's `keytool` into a JUnit `@TempDir`.
 
 ## Coding conventions
 

@@ -7,7 +7,9 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -15,7 +17,7 @@ import java.util.Map;
  */
 public class ConditionalTlsEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
     private static final String PROPERTY_SOURCE_NAME = "inspectorConditionalTls";
-    private static final String BUNDLE_NAME = "inspector";
+    private static final String BUNDLE_PREFIX = "spring.ssl.bundle.pem." + TlsConfigurationProperties.BUNDLE_NAME;
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
@@ -33,18 +35,26 @@ public class ConditionalTlsEnvironmentPostProcessor implements EnvironmentPostPr
                     Leave all TLS settings unset to run plain HTTP.""");
         }
 
+        var locations = new ArrayList<>(List.of(
+                TlsConfigurationProperties.normalizeResourceLocation(certificate),
+                TlsConfigurationProperties.normalizeResourceLocation(privateKey)));
+
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("server.ssl.enabled", "true");
-        properties.put("server.ssl.bundle", BUNDLE_NAME);
-        properties.put("spring.ssl.bundle.pem." + BUNDLE_NAME + ".keystore.certificate",
-                TlsConfigurationProperties.normalizeResourceLocation(certificate));
-        properties.put("spring.ssl.bundle.pem." + BUNDLE_NAME + ".keystore.private-key",
-                TlsConfigurationProperties.normalizeResourceLocation(privateKey));
+        properties.put("server.ssl.bundle", TlsConfigurationProperties.BUNDLE_NAME);
+        properties.put(BUNDLE_PREFIX + ".keystore.certificate", locations.get(0));
+        properties.put(BUNDLE_PREFIX + ".keystore.private-key", locations.get(1));
 
         if (StringUtils.hasText(clientCa)) {
-            properties.put("spring.ssl.bundle.pem." + BUNDLE_NAME + ".truststore.certificate",
-                    TlsConfigurationProperties.normalizeResourceLocation(clientCa));
+            var clientCaLocation = TlsConfigurationProperties.normalizeResourceLocation(clientCa);
+            locations.add(clientCaLocation);
+            properties.put(BUNDLE_PREFIX + ".truststore.certificate", clientCaLocation);
             properties.put("server.ssl.client-auth", "need");
+        }
+
+        // Hot-reload rotated material when Spring Boot can watch it; classpath or inline PEM content cannot be watched.
+        if (locations.stream().allMatch(TlsConfigurationProperties::isWatchable)) {
+            properties.put(BUNDLE_PREFIX + ".reload-on-update", "true");
         }
 
         environment.getPropertySources().remove(PROPERTY_SOURCE_NAME);

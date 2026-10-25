@@ -7,25 +7,32 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.Environment;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.io.InputStream;
-import java.security.cert.CertificateFactory;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Exits the application when the TLS material it is actually serving is about to expire.
+ * <p>
+ * Certificates are read from the live {@code inspector} SSL bundle rather than from disk, so a check always
+ * reflects what the web server presents, including material hot-reloaded by Spring Boot after rotation.
+ */
 @Component
 public class ServerCertificateExpiryMonitor implements ApplicationRunner, DisposableBean {
     private static final Logger logger = LoggerFactory.getLogger(ServerCertificateExpiryMonitor.class);
@@ -34,42 +41,36 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
     private static final String THREAD_NAME = "inspector-cert-expiry-monitor";
 
     private final Environment environment;
-    private final ResourceLoader resourceLoader;
+    private final SslBundles sslBundles;
     private final ConfigurableApplicationContext applicationContext;
     private final Clock clock;
     private ScheduledExecutorService executorService;
 
     @Autowired
     public ServerCertificateExpiryMonitor(Environment environment,
-                                          ResourceLoader resourceLoader,
+                                          SslBundles sslBundles,
                                           ConfigurableApplicationContext applicationContext) {
-        this(environment, resourceLoader, applicationContext, Clock.systemUTC());
+        this(environment, sslBundles, applicationContext, Clock.systemUTC());
     }
 
     ServerCertificateExpiryMonitor(Environment environment,
-                                   ResourceLoader resourceLoader,
+                                   SslBundles sslBundles,
                                    ConfigurableApplicationContext applicationContext,
                                    Clock clock) {
         this.environment = environment;
-        this.resourceLoader = resourceLoader;
+        this.sslBundles = sslBundles;
         this.applicationContext = applicationContext;
         this.clock = clock;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        var certificateLocation = TlsConfigurationProperties.certificate(environment);
-        var clientCaLocation = TlsConfigurationProperties.clientCa(environment);
-        if (!StringUtils.hasText(certificateLocation) && !StringUtils.hasText(clientCaLocation)) {
+        if (!StringUtils.hasText(TlsConfigurationProperties.certificate(environment))) {
             return;
         }
 
         executorService = Executors.newSingleThreadScheduledExecutor(certificateMonitorThreadFactory());
-        executorService.scheduleWithFixedDelay(
-                () -> checkCertificates(certificateLocation, clientCaLocation),
-                0,
-                CHECK_INTERVAL.toSeconds(),
-                TimeUnit.SECONDS);
+        executorService.scheduleWithFixedDelay(this::checkCertificates, 0, CHECK_INTERVAL.toSeconds(), TimeUnit.SECONDS);
     }
 
     @Override
@@ -79,64 +80,75 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
         }
     }
 
-    private void checkCertificates(String certificateLocation, String clientCaLocation) {
+    void checkCertificates() {
         if (isShuttingDown()) {
             return;
         }
-        if (StringUtils.hasText(certificateLocation)) {
-            checkCertificate(certificateLocation, "server TLS certificate", true);
-        }
-        if (StringUtils.hasText(clientCaLocation)) {
-            checkCertificate(clientCaLocation, "client CA certificate", false);
-        }
-    }
-
-    void checkCertificate(String certificateLocation, String description, boolean firstCertificateOnly) {
         try {
-            for (var certificate : loadCertificates(certificateLocation, firstCertificateOnly)) {
-                var expiresAt = certificate.getNotAfter().toInstant();
-                var exitThreshold = clock.instant().plus(EXPIRY_EXIT_WINDOW);
-                if (!expiresAt.isAfter(exitThreshold)) {
-                    logger.error("{} expires at {}, within the {} minute exit window. Exiting.",
-                            description, expiresAt, EXPIRY_EXIT_WINDOW.toMinutes());
-                    exitApplication();
-                } else {
-                    logger.debug("{} expires at {}", description, expiresAt);
-                }
+            var stores = sslBundles.getBundle(TlsConfigurationProperties.BUNDLE_NAME).getStores();
+            if (checkExpiry(serverCertificates(stores.getKeyStore()), "server TLS certificate")) {
+                checkExpiry(trustedCertificates(stores.getTrustStore()), "client CA certificate");
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            logger.debug("Skipping {} expiry check due to thread interruption.", description, e);
         } catch (Exception e) {
-            if (Thread.currentThread().isInterrupted() || isShuttingDown()) {
-                logger.debug("Skipping {} expiry check during shutdown.", description, e);
+            if (isShuttingDown()) {
+                logger.debug("Skipping TLS certificate expiry check during shutdown.", e);
                 return;
             }
-            logger.error("Unable to verify {} expiry. Exiting.", description, e);
+            logger.error("Unable to verify TLS certificate expiry. Exiting.", e);
             exitApplication();
         }
     }
 
-    List<X509Certificate> loadCertificates(String certificateLocation, boolean firstCertificateOnly) throws Exception {
-        var resourceLocation = TlsConfigurationProperties.normalizeResourceLocation(certificateLocation);
-        var resource = resourceLoader.getResource(resourceLocation);
-        try (InputStream inputStream = resource.getInputStream()) {
-            var certificateFactory = CertificateFactory.getInstance("X.509");
-            Collection<X509Certificate> certificates = certificateFactory.generateCertificates(inputStream)
-                    .stream()
-                    .filter(X509Certificate.class::isInstance)
-                    .map(X509Certificate.class::cast)
-                    .toList();
-            if (certificates.isEmpty()) {
-                throw new IllegalStateException("No X.509 certificate found in " + certificateLocation);
+    /**
+     * @return {@code true} if every certificate is outside the exit window
+     */
+    private boolean checkExpiry(List<X509Certificate> certificates, String description) {
+        var exitThreshold = clock.instant().plus(EXPIRY_EXIT_WINDOW);
+        for (var certificate : certificates) {
+            var expiresAt = certificate.getNotAfter().toInstant();
+            if (!expiresAt.isAfter(exitThreshold)) {
+                logger.error("{} {} expires at {}, within the {} minute exit window. Exiting.",
+                        description, certificate.getSubjectX500Principal().getName(), expiresAt,
+                        EXPIRY_EXIT_WINDOW.toMinutes());
+                exitApplication();
+                return false;
             }
-
-            if (firstCertificateOnly) {
-                return List.of(certificates.iterator().next());
-            }
-
-            return new ArrayList<>(certificates);
+            logger.debug("{} {} expires at {}", description, certificate.getSubjectX500Principal().getName(), expiresAt);
         }
+        return true;
+    }
+
+    /**
+     * Leaf certificate of each key entry, i.e. the certificate presented to clients.
+     */
+    static List<X509Certificate> serverCertificates(KeyStore keyStore) throws KeyStoreException {
+        var certificates = new ArrayList<X509Certificate>();
+        for (var alias : Collections.list(keyStore.aliases())) {
+            if (keyStore.isKeyEntry(alias)
+                    && keyStore.getCertificateChain(alias) instanceof Certificate[] chain
+                    && chain.length > 0
+                    && chain[0] instanceof X509Certificate leaf) {
+                certificates.add(leaf);
+            }
+        }
+        if (certificates.isEmpty()) {
+            throw new IllegalStateException("No server certificate found in SSL bundle "
+                    + TlsConfigurationProperties.BUNDLE_NAME);
+        }
+        return certificates;
+    }
+
+    static List<X509Certificate> trustedCertificates(KeyStore trustStore) throws KeyStoreException {
+        if (trustStore == null) {
+            return List.of();
+        }
+        var certificates = new ArrayList<X509Certificate>();
+        for (var alias : Collections.list(trustStore.aliases())) {
+            if (trustStore.isCertificateEntry(alias) && trustStore.getCertificate(alias) instanceof X509Certificate certificate) {
+                certificates.add(certificate);
+            }
+        }
+        return certificates;
     }
 
     void exitApplication() {
@@ -145,7 +157,7 @@ public class ServerCertificateExpiryMonitor implements ApplicationRunner, Dispos
     }
 
     private boolean isShuttingDown() {
-        return executorService != null && executorService.isShutdown();
+        return Thread.currentThread().isInterrupted() || (executorService != null && executorService.isShutdown());
     }
 
     static ThreadFactory certificateMonitorThreadFactory() {

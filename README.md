@@ -85,9 +85,11 @@ docker run -p 8443:8001 \
   europe-docker.pkg.dev/agencyapi/containers/https-certificate-inspector
 ```
 
-Absolute filesystem paths are converted to `file:` resource URLs automatically. Relative paths, `classpath:`, and explicit `file:` URLs are passed through to Spring Boot SSL bundles. TLS material is loaded at startup, so rotating any of these files on disk requires restarting the app/container.
+Plain filesystem paths, absolute or relative to the working directory, are resolved to absolute `file:` resource URLs. `classpath:`, `https:` and explicit `file:` URLs are passed through to the Spring Boot SSL bundle; plain `http:` locations are rejected.
 
-When TLS is configured, the app checks the server certificate, and the client CA when present, immediately and then every 5 minutes using a daemon scheduled executor named `inspector-cert-expiry-monitor`. If any checked certificate expires within 10 minutes of the check time, the process exits with a non-zero status so the container supervisor can restart it and pick up fresh TLS material.
+When all TLS material lives on the filesystem, the bundle is configured with `reload-on-update`, so replacing the files on disk (e.g. cert-manager or a mounted Kubernetes secret) is picked up by the running server without a restart, after Spring Boot's ~10 second quiet period. Material loaded from `classpath:` or `https:` cannot be watched and is only read at startup.
+
+When TLS is configured, the app checks the certificates the server is actually using (the live `inspector` SSL bundle, including any hot-reloaded material) immediately and then every 5 minutes, using a daemon scheduled executor named `inspector-cert-expiry-monitor`. If the server certificate, or any client CA certificate when mTLS is enabled, expires within 10 minutes of the check, the process exits with a non-zero status so the container supervisor can restart it. This is a last resort for material that was not rotated in time: an expired certificate left in place, including a stale CA in the client CA file, will make the container restart repeatedly until it is replaced.
 
 ## Observability
 
