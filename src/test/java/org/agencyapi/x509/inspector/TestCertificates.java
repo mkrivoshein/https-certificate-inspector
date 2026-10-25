@@ -9,6 +9,7 @@ import java.security.cert.X509Certificate;
 /**
  * Fixture certificates from {@code src/test/resources/certificates}, generated with OpenSSL:
  * {@code example.com.pem} is issued by {@code test-ca.pem} and is valid from 2026-10-24T11:45:46Z to 2126-09-30T11:45:46Z.
+ * {@code othername.example.com.pem} lists an {@code otherName} SAN before its only DNS SAN, and its subject CN is not a domain.
  */
 final class TestCertificates {
     static final String LEAF_SHA1 = "D2795970D2DB4B6C83EF7A9D269CE6E410B87342";
@@ -22,6 +23,10 @@ final class TestCertificates {
 
     static X509Certificate leaf() {
         return load("certificates/example.com.pem");
+    }
+
+    static X509Certificate otherNameFirst() {
+        return load("certificates/othername.example.com.pem");
     }
 
     static X509Certificate ca() {

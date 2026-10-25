@@ -87,6 +87,16 @@ class DomainSslControllerTest {
     }
 
     @Test
+    void matchesDnsNameListedAfterBinarySubjectAlternativeName() throws Exception {
+        when(certificateFetcher.fetchCertificate(anyString(), anyBoolean())).thenReturn(List.of(otherNameFirst(), ca()));
+
+        mockMvc.perform(get("/v1/domain/othername.example.com/ssl"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.record_count").value(1))
+                .andExpect(jsonPath("$.records[0].dns_names", equalTo(List.of("othername.example.com"))));
+    }
+
+    @Test
     void returnsNoRecordsWhenCertificateDoesNotMatchHostname() throws Exception {
         mockMvc.perform(get("/v1/domain/example.org/ssl"))
                 .andExpect(status().isOk())

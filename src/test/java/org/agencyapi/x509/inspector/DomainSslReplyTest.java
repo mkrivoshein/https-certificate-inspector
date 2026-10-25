@@ -33,6 +33,11 @@ class DomainSslReplyTest {
     }
 
     @Test
+    void dnsNamesSkipBinarySubjectAlternativeNames() {
+        assertEquals(List.of("othername.example.com"), SslRecord.dnsNames(otherNameFirst()));
+    }
+
+    @Test
     void emptyDistinguishedNameHasNoAttributes() {
         assertEquals(new DistinguishedName(null, List.of(), List.of()), DistinguishedName.from(new X500Principal("")));
     }
@@ -42,6 +47,13 @@ class DomainSslReplyTest {
         var name = DistinguishedName.from(new X500Principal("CN=first,CN=second,O=Org A,O=Org B,C=GB"));
 
         assertEquals(new DistinguishedName("first", List.of("GB"), List.of("Org A", "Org B")), name);
+    }
+
+    @Test
+    void distinguishedNameKeepsEveryAttributeOfMultiValuedRdn() {
+        var name = DistinguishedName.from(new X500Principal("CN=example.com+O=Example Org,C=US"));
+
+        assertEquals(new DistinguishedName("example.com", List.of("US"), List.of("Example Org")), name);
     }
 
     @Test

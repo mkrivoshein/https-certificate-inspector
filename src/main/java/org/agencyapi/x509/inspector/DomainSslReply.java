@@ -3,7 +3,7 @@ package org.agencyapi.x509.inspector;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.naming.InvalidNameException;
+import javax.naming.NamingException;
 import javax.naming.ldap.LdapName;
 import javax.security.auth.x500.X500Principal;
 import java.security.MessageDigest;
@@ -116,27 +116,33 @@ public record DomainSslReply(
             List<String> organization) {
 
         static DistinguishedName from(X500Principal principal) {
-            LdapName name;
-            try {
-                name = new LdapName(principal.getName(X500Principal.RFC2253));
-            } catch (InvalidNameException e) {
-                throw new IllegalStateException("Unable to parse distinguished name " + principal, e);
-            }
-
             String commonName = null;
             var country = new ArrayList<String>();
             var organization = new ArrayList<String>();
-            // LdapName lists RDNs from right to left, walk them in the order they are written
-            for (var rdn : name.getRdns().reversed()) {
-                if (!(rdn.getValue() instanceof String value)) {
-                    continue;
+            try {
+                var name = new LdapName(principal.getName(X500Principal.RFC2253));
+                // LdapName lists RDNs from right to left, walk them in the order they are written
+                for (var rdn : name.getRdns().reversed()) {
+                    // a multi-valued RDN (e.g. CN=a+O=b) holds several attributes
+                    var attributes = rdn.toAttributes().getAll();
+                    while (attributes.hasMore()) {
+                        var attribute = attributes.next();
+                        var values = attribute.getAll();
+                        while (values.hasMore()) {
+                            if (!(values.next() instanceof String value)) {
+                                continue;
+                            }
+                            switch (attribute.getID().toUpperCase(Locale.ROOT)) {
+                                case "CN" -> commonName = commonName == null ? value : commonName;
+                                case "C" -> country.add(value);
+                                case "O" -> organization.add(value);
+                                default -> { }
+                            }
+                        }
+                    }
                 }
-                switch (rdn.getType().toUpperCase(Locale.ROOT)) {
-                    case "CN" -> commonName = commonName == null ? value : commonName;
-                    case "C" -> country.add(value);
-                    case "O" -> organization.add(value);
-                    default -> { }
-                }
+            } catch (NamingException e) {
+                throw new IllegalStateException("Unable to parse distinguished name " + principal, e);
             }
             return new DistinguishedName(commonName, List.copyOf(country), List.copyOf(organization));
         }
