@@ -2,6 +2,8 @@ import org.gradle.api.initialization.resolve.RepositoriesMode
 
 plugins {
     id 'org.ajoberstar.reckon.settings' version '1.0.1'
+    // lets Gradle download the BellSoft Liberica 25 toolchain required by build.gradle when it isn't installed
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
 rootProject.name = 'https-certificate-inspector'
