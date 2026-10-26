@@ -32,6 +32,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DomainResolverTest {
     private static final Name ZONE = name("example.com.");
     private static final Name WWW = name("www.example.com.");
+    private static final DomainResolver.OsResolver NO_OS_ADDRESSES = host -> {
+        throw new UnknownHostException(host);
+    };
 
     @Test
     void returnsIpv4AddressesFollowedByIpv6Addresses() throws Exception {
@@ -39,7 +42,7 @@ class DomainResolverTest {
                 Type.A, List.of(a(ZONE, "192.0.2.1"), a(ZONE, "192.0.2.2")),
                 Type.AAAA, List.of(aaaa(ZONE, "2001:db8::1"))));
 
-        assertThat(new DomainResolver(resolver).resolve("example.com"))
+        assertThat(new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com"))
                 .containsExactly(ip("192.0.2.1"), ip("192.0.2.2"), ip("2001:db8::1"));
     }
 
@@ -47,14 +50,14 @@ class DomainResolverTest {
     void returnsIpv4AddressesWhenThereAreNoAaaaRecords() throws Exception {
         var resolver = new FakeResolver(Map.of(Type.A, List.of(a(ZONE, "192.0.2.1"))));
 
-        assertThat(new DomainResolver(resolver).resolve("example.com")).containsExactly(ip("192.0.2.1"));
+        assertThat(new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com")).containsExactly(ip("192.0.2.1"));
     }
 
     @Test
     void returnsIpv6AddressesWhenThereAreNoARecords() throws Exception {
         var resolver = new FakeResolver(Map.of(Type.AAAA, List.of(aaaa(ZONE, "2001:db8::1"))));
 
-        assertThat(new DomainResolver(resolver).resolve("example.com")).containsExactly(ip("2001:db8::1"));
+        assertThat(new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com")).containsExactly(ip("2001:db8::1"));
     }
 
     @Test
@@ -64,7 +67,7 @@ class DomainResolverTest {
                 Type.A, List.of(cname, a(ZONE, "192.0.2.1")),
                 Type.AAAA, List.of(cname, aaaa(ZONE, "2001:db8::1"))));
 
-        assertThat(new DomainResolver(resolver).resolve("www.example.com"))
+        assertThat(new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("www.example.com"))
                 .containsExactly(ip("192.0.2.1"), ip("2001:db8::1"));
     }
 
@@ -72,7 +75,7 @@ class DomainResolverTest {
     void failsWhenTheDomainHasNoAddresses() {
         var resolver = new FakeResolver(Map.of());
 
-        assertThatThrownBy(() -> new DomainResolver(resolver).resolve("example.com"))
+        assertThatThrownBy(() -> new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com"))
                 .isInstanceOf(UnknownHostException.class)
                 .hasMessageContaining("example.com");
     }
@@ -82,7 +85,7 @@ class DomainResolverTest {
         var resolver = new FakeResolver(Map.of());
         resolver.rcode = Rcode.NXDOMAIN;
 
-        assertThatThrownBy(() -> new DomainResolver(resolver).resolve("example.com"))
+        assertThatThrownBy(() -> new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com"))
                 .isInstanceOf(UnknownHostException.class);
     }
 
@@ -91,17 +94,65 @@ class DomainResolverTest {
         var resolver = new FakeResolver(Map.of(Type.A, List.of(a(ZONE, "192.0.2.1"))));
         resolver.failingType = Type.AAAA;
 
-        assertThatThrownBy(() -> new DomainResolver(resolver).resolve("example.com"))
+        assertThatThrownBy(() -> new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com"))
                 .isInstanceOf(IOException.class)
                 .isNotInstanceOf(UnknownHostException.class)
                 .hasMessageContaining("AAAA");
     }
 
     @Test
+    void fallsBackToOsResolverWhenDnsLookupFails() throws Exception {
+        var resolver = new FakeResolver(Map.of(Type.A, List.of(a(ZONE, "192.0.2.1"))));
+        resolver.failingType = Type.AAAA;
+        DomainResolver.OsResolver os = host -> new InetAddress[]{ip("2001:db8::1"), ip("192.0.2.1"), ip("192.0.2.2")};
+
+        // the OS answer is taken whole, reordered so IPv4 comes first
+        assertThat(new DomainResolver(resolver, os).resolve("example.com"))
+                .containsExactly(ip("192.0.2.1"), ip("192.0.2.2"), ip("2001:db8::1"));
+    }
+
+    @Test
+    void fallsBackToOsResolverWhenDnsHasNoRecords() throws Exception {
+        var resolver = new FakeResolver(Map.of());
+        resolver.rcode = Rcode.NXDOMAIN;
+        var queried = new ArrayList<String>();
+        DomainResolver.OsResolver os = host -> {
+            queried.add(host);
+            return new InetAddress[]{ip("192.0.2.9")};
+        };
+
+        // e.g. a name that only exists in /etc/hosts
+        assertThat(new DomainResolver(resolver, os).resolve("intranet.example.com")).containsExactly(ip("192.0.2.9"));
+        assertThat(queried).containsExactly("intranet.example.com");
+    }
+
+    @Test
+    void doesNotAskOsResolverWhenDnsAnswers() throws Exception {
+        var resolver = new FakeResolver(Map.of(Type.A, List.of(a(ZONE, "192.0.2.1"))));
+        DomainResolver.OsResolver os = host -> {
+            throw new AssertionError("OS resolver must not be used");
+        };
+
+        assertThat(new DomainResolver(resolver, os).resolve("example.com")).containsExactly(ip("192.0.2.1"));
+    }
+
+    @Test
+    void reportsDnsFailureWhenOsResolverFailsToo() {
+        var resolver = new FakeResolver(Map.of());
+        resolver.failingType = Type.A;
+
+        assertThatThrownBy(() -> new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("example.com"))
+                .isInstanceOf(IOException.class)
+                .isNotInstanceOf(UnknownHostException.class)
+                .hasMessageContaining("lookup for example.com. failed")
+                .satisfies(e -> assertThat(e.getSuppressed()).hasOnlyElementsOfType(UnknownHostException.class).hasSize(1));
+    }
+
+    @Test
     void rejectsInvalidDomainNames() {
         var resolver = new FakeResolver(Map.of());
 
-        assertThatThrownBy(() -> new DomainResolver(resolver).resolve("a".repeat(64) + ".com"))
+        assertThatThrownBy(() -> new DomainResolver(resolver, NO_OS_ADDRESSES).resolve("a".repeat(64) + ".com"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

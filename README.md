@@ -122,10 +122,10 @@ This service **keeps no history**: it does live TLS handshakes and only sees the
 
 ### Multiple addresses
 
-A domain served from several addresses (load balancers, CDNs, dual-stack IPv4/IPv6) can present a different certificate on each, for example when one node wasn't updated after a renewal. Both APIs therefore look up the domain's A and AAAA records with their own DNS client (following CNAMEs), not the OS resolver, and do a TLS handshake with every address on port 443. Each handshake sends the domain as SNI, so every server picks the certificate it would serve to a browser.
+A domain served from several addresses (load balancers, CDNs, dual-stack IPv4/IPv6) can present a different certificate on each, for example when one node wasn't updated after a renewal. Both APIs therefore look up the domain's A and AAAA records with their own DNS client (following CNAMEs) rather than taking the single address the OS resolver picks, and do a TLS handshake with every address on port 443. Each handshake sends the domain as SNI, so every server picks the certificate it would serve to a browser.
 
 - IPv4 addresses come first, then IPv6, each in the order the DNS server returned them. IPv6 addresses are written in their short form.
-- A failed DNS lookup fails the request rather than returning a partial list of addresses.
+- When the DNS client can't resolve the name (a failed lookup, or no records), the OS resolver is tried too, which also finds names that only exist in `/etc/hosts` or behind a search domain. Its answer is used as is, IPv4 first. A failed DNS lookup is never taken as a partial list of addresses.
 - IPv6 addresses fail with an error when the service itself has no IPv6 connectivity.
 - The handshakes run in parallel, each with a 5 second connect and read timeout. At most 32 handshakes run at once across all requests; further addresses wait for a free slot.
 
