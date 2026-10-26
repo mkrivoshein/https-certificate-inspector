@@ -9,9 +9,9 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | Path | Purpose |
 |------|---------|
 | `CertificateInspector.java` | Spring Boot entry point. |
-| `CertificateInspectorController.java` | REST controller for `/inspect/{domain}` and `/inspect/{domain}/addresses`. Owns the `inspect`, `inspect-addresses` and per-address `inspect-address` spans and the exception → status mapping. |
-| `CertificateInspectorReply.java` | Response record + nested `CertificateInfo` projection of `X509Certificate`. |
-| `AddressInspectorReply.java` | Response record of `/inspect/{domain}/addresses`: one entry per resolved address. |
+| `CertificateInspectorController.java` | REST controller for `/inspect/{domain}`. Owns the `inspect` span and the exception → status mapping. |
+| `CertificateInspectorReply.java` | Response record + nested `CertificateInfo` projection of `X509Certificate` and per-address `AddressInfo`. |
+| `AddressInspector.java` | Resolves A/AAAA records and handshakes with every address in parallel (capped across requests); used by both controllers. Owns the per-address `inspect-address` spans. |
 | `DomainResolver.java` | A/AAAA lookups with dnsjava (not the OS resolver), so every published address is inspected. |
 | `DomainSslController.java` / `DomainSslReply.java` | SecurityTrails-compatible `/v1/domain/{hostname}/ssl` (and `/tls`) endpoint and its snake_case response records. Owns the `domain-ssl` span. |
 | `CertificateFetcher.java` / `CertificateUtils.java` / `IpUtils.java` | Certificate retrieval and helpers. Connecting to a specific IP goes through an `SSLSocket` with explicit SNI: `HttpsURLConnection` sends no SNI when the URL host is an IP address. |

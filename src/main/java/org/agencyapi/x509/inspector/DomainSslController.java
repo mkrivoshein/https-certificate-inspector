@@ -16,7 +16,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import java.io.IOException;
 import java.net.SocketTimeoutException;
-import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.List;
@@ -34,11 +34,11 @@ public class DomainSslController {
     static final String MASKED_API_KEY = "********";
 
     private final Tracer tracer;
-    private final CertificateFetcher certificateFetcher;
+    private final AddressInspector addressInspector;
 
-    public DomainSslController(Tracer tracer, CertificateFetcher certificateFetcher) {
+    public DomainSslController(Tracer tracer, AddressInspector addressInspector) {
         this.tracer = tracer;
-        this.certificateFetcher = certificateFetcher;
+        this.addressInspector = addressInspector;
     }
 
     record ErrorReply(String message) {
@@ -110,7 +110,7 @@ public class DomainSslController {
 
             // everything fits on the first page, later pages are empty
             var certificates = requestedPage == 1
-                    ? fetchLeafCertificate(hostname, certificateStatus)
+                    ? fetchLeafCertificates(hostname, certificateStatus)
                     : List.<X509Certificate>of();
             return DomainSslReply.create(request.getRequestURI(), query, requestedPage, certificates);
         } catch (RuntimeException e) {
@@ -121,21 +121,33 @@ public class DomainSslController {
         }
     }
 
-    private List<X509Certificate> fetchLeafCertificate(String hostname, DomainSslReply.Status status) {
-        List<X509Certificate> chain;
+    /**
+     * Collects the leaf certificate of every A and AAAA address, without duplicates, so a node serving a different
+     * certificate shows up as an extra record. Addresses that can't be reached are skipped unless none can be.
+     */
+    private List<X509Certificate> fetchLeafCertificates(String hostname, DomainSslReply.Status status) {
+        List<AddressInspector.AddressResult> results;
         try {
-            chain = certificateFetcher.fetchCertificate("https://" + hostname, true);
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("The requested domain has invalid characters", e);
-        } catch (SocketTimeoutException e) {
-            throw new UpstreamException(HttpStatus.GATEWAY_TIMEOUT, "Timed out connecting to " + hostname, e);
+            results = addressInspector.inspect(hostname);
+        } catch (UnknownHostException e) {
+            throw new UpstreamException(HttpStatus.NOT_FOUND, "No A or AAAA records found for " + hostname, e);
         } catch (IOException e) {
-            throw new UpstreamException(HttpStatus.BAD_GATEWAY, "Unable to retrieve certificate from " + hostname, e);
+            throw new UpstreamException(HttpStatus.BAD_GATEWAY, "Unable to resolve " + hostname, e);
         }
 
-        // the server presents the leaf certificate first, followed by intermediates
-        return chain.stream()
-                .limit(1)
+        if (results.stream().noneMatch(AddressInspector.AddressResult::reachable)) {
+            var cause = results.getFirst().error();
+            if (results.stream().allMatch(result -> result.error() instanceof SocketTimeoutException)) {
+                throw new UpstreamException(HttpStatus.GATEWAY_TIMEOUT, "Timed out connecting to " + hostname, cause);
+            }
+            throw new UpstreamException(HttpStatus.BAD_GATEWAY, "Unable to retrieve certificate from " + hostname, cause);
+        }
+
+        // each server presents its leaf certificate first, followed by intermediates
+        return results.stream()
+                .filter(AddressInspector.AddressResult::reachable)
+                .flatMap(result -> result.handshake().certificates().stream().limit(1))
+                .distinct()
                 .filter(cert -> CertificateUtils.verifyCertificateForDomain(cert, hostname))
                 .filter(cert -> status.matches(cert, Instant.now()))
                 .toList();

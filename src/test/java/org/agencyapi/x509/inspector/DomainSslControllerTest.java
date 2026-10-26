@@ -12,13 +12,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.io.IOException;
 import java.net.ConnectException;
+import java.net.InetAddress;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.security.cert.X509Certificate;
 import java.util.List;
 
 import static org.agencyapi.x509.inspector.TestCertificates.*;
 import static org.hamcrest.Matchers.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -30,15 +36,22 @@ class DomainSslControllerTest {
     @Autowired
     private WebApplicationContext context;
 
+    private static final InetAddress IPV4 = address("192.0.2.1");
+    private static final InetAddress IPV6 = address("2001:db8::1");
+
     @MockitoBean
     private CertificateFetcher certificateFetcher;
+
+    @MockitoBean
+    private DomainResolver domainResolver;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() throws Exception {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
-        when(certificateFetcher.fetchCertificate(anyString(), anyBoolean())).thenReturn(List.of(leaf(), ca()));
+        when(domainResolver.resolve(anyString())).thenReturn(List.of(IPV4));
+        serve(IPV4, leaf(), ca());
     }
 
     @ParameterizedTest
@@ -69,7 +82,7 @@ class DomainSslControllerTest {
                 .andExpect(jsonPath("$.records[0].not_after").value(LEAF_NOT_AFTER))
                 .andExpect(jsonPath("$.records[0].serial_number").value(LEAF_SERIAL));
 
-        verify(certificateFetcher).fetchCertificate(eq("https://example.com"), eq(true));
+        verify(certificateFetcher).fetchCertificate(IPV4, "example.com", 443, true);
     }
 
     @Test
@@ -88,7 +101,7 @@ class DomainSslControllerTest {
 
     @Test
     void matchesDnsNameListedAfterBinarySubjectAlternativeName() throws Exception {
-        when(certificateFetcher.fetchCertificate(anyString(), anyBoolean())).thenReturn(List.of(otherNameFirst(), ca()));
+        serve(IPV4, otherNameFirst(), ca());
 
         mockMvc.perform(get("/v1/domain/othername.example.com/ssl"))
                 .andExpect(status().isOk())
@@ -124,7 +137,7 @@ class DomainSslControllerTest {
                 .andExpect(jsonPath("$.meta.query.page").value("2"))
                 .andExpect(jsonPath("$.records", empty()));
 
-        verifyNoInteractions(certificateFetcher);
+        verifyNoInteractions(domainResolver, certificateFetcher);
     }
 
     @Test
@@ -173,8 +186,50 @@ class DomainSslControllerTest {
     }
 
     @Test
+    void returnsDistinctLeafCertificatesAcrossAddresses() throws Exception {
+        var third = address("192.0.2.2");
+        when(domainResolver.resolve("example.com")).thenReturn(List.of(IPV4, third, IPV6));
+        serve(third, leaf(), ca());
+        serve(IPV6, otherNameFirst(), ca());
+
+        // othername.example.com's certificate doesn't cover example.com, and the second copy of leaf() is a duplicate
+        mockMvc.perform(get("/v1/domain/example.com/ssl"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.record_count").value(1))
+                .andExpect(jsonPath("$.records[0].fingerprints.sha256").value(LEAF_SHA256));
+
+        verify(certificateFetcher).fetchCertificate(IPV6, "example.com", 443, true);
+    }
+
+    @Test
+    void returnsEveryMatchingCertificateWhenAddressesServeDifferentOnes() throws Exception {
+        when(domainResolver.resolve("othername.example.com")).thenReturn(List.of(IPV4, IPV6));
+        serve(IPV6, otherNameFirst(), ca());
+
+        // leaf() covers *.example.com, otherNameFirst() covers othername.example.com
+        mockMvc.perform(get("/v1/domain/othername.example.com/ssl"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.record_count").value(2))
+                .andExpect(jsonPath("$.records[0].fingerprints.sha256").value(LEAF_SHA256))
+                .andExpect(jsonPath("$.records[1].dns_names", equalTo(List.of("othername.example.com"))));
+    }
+
+    @Test
+    void skipsUnreachableAddresses() throws Exception {
+        when(domainResolver.resolve("example.com")).thenReturn(List.of(IPV6, IPV4));
+        when(certificateFetcher.fetchCertificate(eq(IPV6), anyString(), anyInt(), anyBoolean()))
+                .thenThrow(new ConnectException("Network is unreachable"));
+
+        mockMvc.perform(get("/v1/domain/example.com/ssl"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.record_count").value(1));
+    }
+
+    @Test
     void mapsConnectionTimeoutToGatewayTimeout() throws Exception {
-        when(certificateFetcher.fetchCertificate(anyString(), anyBoolean())).thenThrow(new SocketTimeoutException("timeout"));
+        when(domainResolver.resolve("example.com")).thenReturn(List.of(IPV4, IPV6));
+        when(certificateFetcher.fetchCertificate(any(InetAddress.class), anyString(), anyInt(), anyBoolean()))
+                .thenThrow(new SocketTimeoutException("timeout"));
 
         mockMvc.perform(get("/v1/domain/example.com/ssl"))
                 .andExpect(status().isGatewayTimeout())
@@ -183,7 +238,11 @@ class DomainSslControllerTest {
 
     @Test
     void mapsConnectionFailureToBadGateway() throws Exception {
-        when(certificateFetcher.fetchCertificate(anyString(), anyBoolean())).thenThrow(new ConnectException("refused"));
+        when(domainResolver.resolve("example.com")).thenReturn(List.of(IPV4, IPV6));
+        when(certificateFetcher.fetchCertificate(eq(IPV4), anyString(), anyInt(), anyBoolean()))
+                .thenThrow(new SocketTimeoutException("timeout"));
+        when(certificateFetcher.fetchCertificate(eq(IPV6), anyString(), anyInt(), anyBoolean()))
+                .thenThrow(new ConnectException("refused"));
 
         mockMvc.perform(get("/v1/domain/example.com/ssl"))
                 .andExpect(status().isBadGateway())
@@ -191,11 +250,40 @@ class DomainSslControllerTest {
     }
 
     @Test
-    void inspectEndpointIsUnchanged() throws Exception {
-        mockMvc.perform(get("/inspect/example.com"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.domain").value("example.com"))
-                .andExpect(jsonPath("$.certificates", hasSize(2)))
-                .andExpect(jsonPath("$.certificates[0].serialNumber").value(LEAF_SERIAL));
+    void returnsNotFoundWhenTheDomainHasNoAddresses() throws Exception {
+        when(domainResolver.resolve("example.com")).thenThrow(new UnknownHostException("No A or AAAA records found for example.com"));
+
+        mockMvc.perform(get("/v1/domain/example.com/ssl"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("No A or AAAA records found for example.com"));
+    }
+
+    @Test
+    void mapsDnsFailureToBadGateway() throws Exception {
+        when(domainResolver.resolve("example.com")).thenThrow(new IOException("DNS A lookup for example.com. failed: timed out"));
+
+        mockMvc.perform(get("/v1/domain/example.com/ssl"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("Unable to resolve example.com"));
+    }
+
+    @Test
+    void rejectsIpAddressesWithJsonMessage() throws Exception {
+        mockMvc.perform(get("/v1/domain/192.0.2.1/ssl"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("looks like an IP address")));
+    }
+
+    private void serve(InetAddress address, X509Certificate... chain) throws IOException {
+        when(certificateFetcher.fetchCertificate(eq(address), anyString(), anyInt(), anyBoolean()))
+                .thenReturn(new CertificateFetcher.HandshakeResult(List.of(chain), false));
+    }
+
+    private static InetAddress address(String address) {
+        try {
+            return InetAddress.getByName(address);
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException(e);
+        }
     }
 }
