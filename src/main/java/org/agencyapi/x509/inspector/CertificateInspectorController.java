@@ -19,6 +19,7 @@ import java.net.UnknownHostException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
 
@@ -26,6 +27,10 @@ import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
 @Validated
 public class CertificateInspectorController {
     private static final Logger logger = LoggerFactory.getLogger(CertificateInspectorController.class);
+
+    // caps the address handshakes in flight across all requests; further addresses wait for a free slot
+    static final int MAX_CONCURRENT_HANDSHAKES = 32;
+    private final Semaphore handshakeSlots = new Semaphore(MAX_CONCURRENT_HANDSHAKES);
 
     private final Tracer tracer;
     private final CertificateFetcher certificateFetcher;
@@ -115,8 +120,16 @@ public class CertificateInspectorController {
     private AddressInspectorReply.AddressInfo inspectAddress(Span parent, String domain, InetAddress address) {
         var span = tracer.nextSpan(parent).name("inspect-address").tag("address", InetAddresses.toAddrString(address));
         try (var withSpan = tracer.withSpan(span.start())) {
-            var result = certificateFetcher.fetchCertificate(address, domain, 443, true);
-            return AddressInspectorReply.AddressInfo.inspected(address, result);
+            handshakeSlots.acquire();
+            try {
+                var result = certificateFetcher.fetchCertificate(address, domain, 443, true);
+                return AddressInspectorReply.AddressInfo.inspected(address, result);
+            } finally {
+                handshakeSlots.release();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to inspect " + InetAddresses.toAddrString(address), e);
         } catch (IOException e) {
             logger.info("Unable to inspect {} at {}: {}", domain, InetAddresses.toAddrString(address), e.toString());
             span.error(e);

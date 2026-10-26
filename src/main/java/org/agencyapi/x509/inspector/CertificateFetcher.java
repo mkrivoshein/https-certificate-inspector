@@ -62,8 +62,9 @@ public class CertificateFetcher {
      */
     public HandshakeResult fetchCertificate(InetAddress address, String domainName, int port, boolean trustAllCerts)
             throws IOException {
-        // rejects names that cannot be sent as SNI before any connection is made
-        var serverName = new SNIHostName(domainName);
+        // SNI carries no root dot, so an absolute name such as "example.com." is sent as "example.com";
+        // names that cannot be sent as SNI are rejected before any connection is made
+        var serverName = new SNIHostName(domainName.endsWith(".") ? domainName.substring(0, domainName.length() - 1) : domainName);
         SSLContext sslContext;
         try {
             sslContext = trustAllCerts ? trustAllContext() : SSLContext.getDefault();

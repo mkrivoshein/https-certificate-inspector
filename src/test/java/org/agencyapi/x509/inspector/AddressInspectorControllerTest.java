@@ -14,9 +14,12 @@ import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import static org.agencyapi.x509.inspector.TestCertificates.ca;
 import static org.agencyapi.x509.inspector.TestCertificates.leaf;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
@@ -109,6 +112,28 @@ class AddressInspectorControllerTest {
                 .andExpect(jsonPath("$.addresses[1].error").value("Network is unreachable"))
                 .andExpect(jsonPath("$.addresses[1]", not(hasKey("certificates"))))
                 .andExpect(jsonPath("$.addresses[1]", not(hasKey("ocspStaplingEnabled"))));
+    }
+
+    @Test
+    void limitsConcurrentHandshakesButInspectsEveryAddress() throws Exception {
+        var addresses = IntStream.rangeClosed(1, CertificateInspectorController.MAX_CONCURRENT_HANDSHAKES + 8)
+                .mapToObj(i -> address("192.0.2." + i))
+                .toList();
+        when(domainResolver.resolve("example.com")).thenReturn(addresses);
+        var inFlight = new AtomicInteger();
+        var maxInFlight = new AtomicInteger();
+        when(certificateFetcher.fetchCertificate(any(InetAddress.class), anyString(), anyInt(), anyBoolean())).thenAnswer(_ -> {
+            maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            Thread.sleep(50);
+            inFlight.decrementAndGet();
+            return new CertificateFetcher.HandshakeResult(List.of(leaf()), false);
+        });
+
+        mockMvc.perform(get("/inspect/example.com/addresses"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.addresses", hasSize(addresses.size())));
+
+        assertThat(maxInFlight.get()).isBetween(2, CertificateInspectorController.MAX_CONCURRENT_HANDSHAKES);
     }
 
     @Test

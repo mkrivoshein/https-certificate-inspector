@@ -98,6 +98,16 @@ class AddressHandshakeTest {
     }
 
     @Test
+    void sendsAbsoluteDomainWithoutTheRootDotAsSni() throws Exception {
+        var address = InetAddress.getByName("127.0.0.1");
+        try (var server = startServer(address)) {
+            fetcher.fetchCertificate(address, DOMAIN + ".", server.getLocalPort(), true);
+
+            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEqualTo(DOMAIN);
+        }
+    }
+
+    @Test
     void failsHandshakeWithUntrustedCertificateUnlessTrustingAll() throws Exception {
         var address = InetAddress.getByName("127.0.0.1");
         try (var server = startServer(address)) {

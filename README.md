@@ -94,7 +94,7 @@ curl http://localhost:8001/inspect/example.com/addresses
 - IPv4 addresses come first, then IPv6, each in the order the DNS server returned them. IPv6 addresses are written in their short form.
 - `certificates` has the same fields as in `/inspect/{domain}`. `ocspStaplingEnabled` comes from the same handshake.
 - An address that can't be reached or fails the handshake is listed with an `error` instead of `certificates` and `ocspStaplingEnabled`; the other addresses are still returned. IPv6 addresses fail this way when the service itself has no IPv6 connectivity.
-- The handshakes run in parallel, each with a 5 second connect and read timeout.
+- The handshakes run in parallel, each with a 5 second connect and read timeout. At most 32 address handshakes run at once across all requests; further addresses wait for a free slot.
 - `404 Not Found` when the domain has no A or AAAA records, `502 Bad Gateway` when a DNS lookup fails (rather than returning a partial list), and `400 Bad Request` for an invalid domain or an IP address. All error bodies are plain text.
 
 ### `/v1/domain/{hostname}/ssl` (SecurityTrails-compatible)
