@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,7 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Covers {@code /inspect/{domain}}: the certificates of every A and AAAA address, the top-level fields taken from the
- * first reachable address, and the OCSP fields ({@code ocspStaplingEnabled} and each certificate's {@code ocspUrl}).
+ * first reachable address, the OCSP fields ({@code ocspStaplingEnabled} and each certificate's {@code ocspUrl}), and
+ * the default certificate of an IP address, inspected without SNI.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 class CertificateInspectorControllerTest {
@@ -188,11 +190,55 @@ class CertificateInspectorControllerTest {
     }
 
     @Test
-    void rejectsIpAddresses() throws Exception {
+    void inspectsTheDefaultCertificateOfAnIpv4AddressWithoutSni() throws Exception {
         mockMvc.perform(get("/inspect/192.0.2.1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain").value("192.0.2.1"))
+                .andExpect(jsonPath("$.certificates", hasSize(2)))
+                .andExpect(jsonPath("$.addresses", hasSize(1)))
+                .andExpect(jsonPath("$.addresses[0].address").value("192.0.2.1"))
+                .andExpect(jsonPath("$.addresses[0].type").value("A"))
+                .andExpect(jsonPath("$.addresses[0].certificates", hasSize(2)));
+
+        verify(certificateFetcher).fetchCertificate(IPV4, null, 443, true);
+        verifyNoInteractions(domainResolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2001:db8::1", "2001:DB8:0:0:0:0:0:1"})
+    void inspectsTheDefaultCertificateOfAnIpv6AddressWithoutSni(String address) throws Exception {
+        serve(IPV6, true, leaf());
+
+        mockMvc.perform(get("/inspect/" + address))
+                .andExpect(status().isOk())
+                // written in its short form, like the addresses of a domain
+                .andExpect(jsonPath("$.domain").value("2001:db8::1"))
+                .andExpect(jsonPath("$.ocspStaplingEnabled").value(true))
+                .andExpect(jsonPath("$.certificates", hasSize(1)))
+                .andExpect(jsonPath("$.addresses", hasSize(1)))
+                .andExpect(jsonPath("$.addresses[0].address").value("2001:db8::1"))
+                .andExpect(jsonPath("$.addresses[0].type").value("AAAA"));
+
+        verify(certificateFetcher).fetchCertificate(IPV6, null, 443, true);
+        verifyNoInteractions(domainResolver);
+    }
+
+    @Test
+    void returnsBadGatewayWhenTheIpAddressIsUnreachable() throws Exception {
+        when(certificateFetcher.fetchCertificate(eq(IPV4), any(), anyInt(), anyBoolean()))
+                .thenThrow(new ConnectException("Connection refused"));
+
+        mockMvc.perform(get("/inspect/192.0.2.1"))
+                .andExpect(status().isBadGateway())
+                .andExpect(content().string(containsString("192.0.2.1: Connection refused")));
+    }
+
+    @Test
+    void rejectsIpv6AddressesWithAZoneId() throws Exception {
+        mockMvc.perform(get("/inspect/fe80::1%25eth0"))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(domainResolver);
+        verify(certificateFetcher, never()).fetchCertificate(any(InetAddress.class), any(), anyInt(), anyBoolean());
     }
 
     @Test
@@ -204,7 +250,8 @@ class CertificateInspectorControllerTest {
     }
 
     private void serve(InetAddress address, boolean stapled, X509Certificate... chain) throws IOException {
-        when(certificateFetcher.fetchCertificate(eq(address), anyString(), anyInt(), anyBoolean()))
+        // any() rather than anyString(): an IP address is inspected without SNI, so with a null server name
+        when(certificateFetcher.fetchCertificate(eq(address), any(), anyInt(), anyBoolean()))
                 .thenReturn(new CertificateFetcher.HandshakeResult(List.of(chain), stapled));
     }
 
