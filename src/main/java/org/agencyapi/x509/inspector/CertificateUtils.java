@@ -3,9 +3,15 @@ package org.agencyapi.x509.inspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.naming.NamingException;
+import javax.naming.ldap.LdapName;
+import javax.security.auth.x500.X500Principal;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 
 public class CertificateUtils {
     private static final Logger logger = LoggerFactory.getLogger(CertificateUtils.class);
@@ -81,10 +87,11 @@ public class CertificateUtils {
                 }
             }
 
-            // Fallback to checking Common Name (CN) in subject
-            var subjectDN = cert.getSubjectX500Principal().getName();
-            if (subjectDN.contains("CN=" + domainName)) {
-                return true;
+            // Fallback to the subject's Common Name(s), matched exactly like a SAN DNS name
+            for (var commonName : commonNames(cert.getSubjectX500Principal())) {
+                if (matchesDomain(commonName, domainName)) {
+                    return true;
+                }
             }
 
         } catch (Exception e) {
@@ -92,6 +99,33 @@ public class CertificateUtils {
         }
 
         return false;
+    }
+
+    /**
+     * Returns every CN value in the name, including CNs inside multi-valued RDNs, decoded from RFC 2253 escaping
+     */
+    private static List<String> commonNames(X500Principal principal) {
+        var commonNames = new ArrayList<String>();
+        try {
+            for (var rdn : new LdapName(principal.getName(X500Principal.RFC2253)).getRdns()) {
+                var attributes = rdn.toAttributes().getAll();
+                while (attributes.hasMore()) {
+                    var attribute = attributes.next();
+                    if (!"CN".equals(attribute.getID().toUpperCase(Locale.ROOT))) {
+                        continue;
+                    }
+                    var values = attribute.getAll();
+                    while (values.hasMore()) {
+                        if (values.next() instanceof String value) {
+                            commonNames.add(value);
+                        }
+                    }
+                }
+            }
+        } catch (NamingException e) {
+            logger.warn("Could not parse subject {}: {}", principal, e.getMessage());
+        }
+        return commonNames;
     }
 
     /**
