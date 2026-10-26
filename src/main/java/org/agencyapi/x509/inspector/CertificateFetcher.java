@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import javax.net.ssl.*;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -18,7 +19,6 @@ import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.agencyapi.x509.inspector.IpUtils.isValidIPv4;
 import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
 
 @Component
@@ -42,27 +42,54 @@ public class CertificateFetcher {
     }
 
     /**
-     * Fetches certificate by connecting to a specific IPv4 address while using a domain name for SNI
-     * @param ipv4Address The IPv4 address to connect to (e.g., "142.250.185.46")
-     * @param domainName The domain name for SNI and Host header (e.g., "www.google.com")
+     * Result of a TLS handshake with one server address.
+     * @param certificates the chain the server presented, leaf first
+     * @param ocspStapled whether the server stapled an OCSP response during the handshake
+     */
+    public record HandshakeResult(List<X509Certificate> certificates, boolean ocspStapled) {
+    }
+
+    /**
+     * Connects to a specific IPv4 or IPv6 address and performs a TLS handshake, sending {@code domainName} as SNI,
+     * so each address a domain resolves to can be inspected. {@link HttpsURLConnection} sends no SNI when the URL host
+     * is an IP address, which is why this opens the socket directly instead.
+     * @param address The address to connect to
+     * @param domainName The domain name to send as SNI (e.g., "www.google.com")
      * @param port The port to connect to (typically 443 for HTTPS)
      * @param trustAllCerts Whether to trust all certificates (use with caution)
-     * @return List of X509Certificate objects from the server
-     * @throws IOException if connection fails
-     * @throws URISyntaxException if URL construction fails
+     * @return the presented certificates and whether an OCSP response was stapled
+     * @throws IOException if the connection or handshake fails
      */
-    public List<X509Certificate> fetchCertificate(String ipv4Address, String domainName, int port, boolean trustAllCerts)
-            throws IOException, URISyntaxException {
-        // Validate IPv4 address format
-        if (!isValidIPv4(ipv4Address)) {
-            throw new IllegalArgumentException("Invalid IPv4 address: " + ipv4Address);
+    public HandshakeResult fetchCertificate(InetAddress address, String domainName, int port, boolean trustAllCerts)
+            throws IOException {
+        // SNI carries no root dot, so an absolute name such as "example.com." is sent as "example.com";
+        // names that cannot be sent as SNI are rejected before any connection is made
+        var serverName = new SNIHostName(domainName.endsWith(".") ? domainName.substring(0, domainName.length() - 1) : domainName);
+        SSLContext sslContext;
+        try {
+            sslContext = trustAllCerts ? trustAllContext() : SSLContext.getDefault();
+        } catch (NoSuchAlgorithmException | KeyManagementException e) {
+            throw new IllegalStateException("Unable to configure the TLS context", e);
         }
 
-        // Build URL using the IPv4 address
-        var urlString = String.format("https://%s:%d/", ipv4Address, port);
-        var url = new URI(urlString).toURL();
+        try (var sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket()) {
+            var params = sslSocket.getSSLParameters();
+            params.setServerNames(List.of(serverName));
+            sslSocket.setSSLParameters(params);
 
-        return fetchCertificate(url, domainName, trustAllCerts);
+            sslSocket.connect(new InetSocketAddress(address, port), 5000);
+            sslSocket.setSoTimeout(5000);
+            sslSocket.startHandshake();
+
+            // no hostname verification: the application would prefer to download all certificates
+            var session = sslSocket.getSession();
+            var certificates = Arrays.stream(session.getPeerCertificates())
+                    .filter(cert -> cert instanceof X509Certificate)
+                    .map(cert -> (X509Certificate) cert)
+                    .toList();
+            var ocspStapled = session instanceof ExtendedSSLSession extSession && !extSession.getStatusResponses().isEmpty();
+            return new HandshakeResult(certificates, ocspStapled);
+        }
     }
 
     /**
@@ -132,13 +159,7 @@ public class CertificateFetcher {
      */
     public boolean checkOcspStapling(String host, int port, boolean trustAllCerts) {
         try {
-            SSLContext sslContext;
-            if (trustAllCerts) {
-                sslContext = SSLContext.getInstance("TLS");
-                sslContext.init(null, buildTrustAllManagers(), new SecureRandom());
-            } else {
-                sslContext = SSLContext.getDefault();
-            }
+            var sslContext = trustAllCerts ? trustAllContext() : SSLContext.getDefault();
 
             try (SSLSocket sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket()) {
                 SSLParameters params = sslSocket.getSSLParameters();
@@ -165,9 +186,13 @@ public class CertificateFetcher {
      * Sets up SSL context to trust all certificates
      */
     private void setupTrustAllCerts(HttpsURLConnection connection) throws NoSuchAlgorithmException, KeyManagementException {
+        connection.setSSLSocketFactory(trustAllContext().getSocketFactory());
+    }
+
+    private SSLContext trustAllContext() throws NoSuchAlgorithmException, KeyManagementException {
         var sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, buildTrustAllManagers(), new java.security.SecureRandom());
-        connection.setSSLSocketFactory(sslContext.getSocketFactory());
+        sslContext.init(null, buildTrustAllManagers(), new SecureRandom());
+        return sslContext;
     }
 
     private TrustManager[] buildTrustAllManagers() {
