@@ -3,7 +3,7 @@ package org.agencyapi.x509.inspector;
 import com.google.common.net.InetAddresses;
 import io.micrometer.tracing.Tracer;
 import jakarta.validation.ConstraintViolationException;
-import org.agencyapi.x509.inspector.validators.Domain;
+import org.agencyapi.x509.inspector.validators.DomainOrIp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
@@ -57,32 +58,46 @@ public class CertificateInspectorController {
     }
 
     /**
-     * Inspects the certificate chain presented by every A and AAAA address of the domain. Responds 502 when no address
-     * completes a handshake.
+     * Inspects the certificate chain presented by every A and AAAA address of the domain. When {@code domain} is an
+     * IPv4 or IPv6 address, inspects the default certificate of that address instead, without DNS and without SNI.
+     * Responds 502 when no address completes a handshake.
      */
     @GetMapping("/inspect/{domain}")
     @SuppressWarnings("unused")
-    public CertificateInspectorReply sslTest(@PathVariable("domain") @Domain String domain) throws IOException {
+    public CertificateInspectorReply sslTest(@PathVariable("domain") @DomainOrIp String domain) throws IOException {
         var newSpan = tracer.nextSpan().name("inspect");
         try (var withSpan = tracer.withSpan(newSpan.start())) {
             logger.info("SSL test query for {}", domain);
+            if (InetAddresses.isInetAddress(domain)) {
+                var address = InetAddresses.forString(domain);
+                var result = addressInspector.inspect(address);
+                if (!result.reachable()) {
+                    throw new IOException("Unable to retrieve certificates from " + InetAddresses.toAddrString(address)
+                            + ": " + result.error().getMessage());
+                }
+                return reply(InetAddresses.toAddrString(address), List.of(result));
+            }
             var results = addressInspector.inspect(domain);
             if (results.stream().noneMatch(AddressInspector.AddressResult::reachable)) {
                 throw new IOException("Unable to retrieve certificates from any address of " + domain + ": " + results.stream()
                         .map(result -> InetAddresses.toAddrString(result.address()) + " " + result.error().getMessage())
                         .collect(Collectors.joining("; ")));
             }
-            results.stream()
-                    .filter(AddressInspector.AddressResult::reachable)
-                    .findFirst()
-                    .ifPresent(result -> result.handshake().certificates().forEach(CertificateUtils::printCertificateDetails));
-            return CertificateInspectorReply.create(domain, results);
+            return reply(domain, results);
         } catch (IOException | RuntimeException e) {
             newSpan.error(e);
             throw e;
         } finally {
             newSpan.end();
         }
+    }
+
+    private static CertificateInspectorReply reply(String domain, List<AddressInspector.AddressResult> results) {
+        results.stream()
+                .filter(AddressInspector.AddressResult::reachable)
+                .findFirst()
+                .ifPresent(result -> result.handshake().certificates().forEach(CertificateUtils::printCertificateDetails));
+        return CertificateInspectorReply.create(domain, results);
     }
 
     @GetMapping("/health")
