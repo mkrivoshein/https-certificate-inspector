@@ -3,6 +3,7 @@
 A small Spring Boot service that connects to an HTTPS endpoint, reads the X.509 certificates it presents, and returns key facts about them as JSON. It offers two APIs:
 
 - `/inspect/{domain}`: the full certificate chain, in this service's own format.
+- `/inspect/{domain}/addresses`: the certificate chain presented by each IPv4 and IPv6 address the domain resolves to.
 - `/v1/domain/{hostname}/ssl`: the domain's certificate in the same format as SecurityTrails' Get Domain SSL API, so SecurityTrails clients can switch to this service by changing their base URL.
 
 Certificates are read live on every request; the service keeps no history.
@@ -24,6 +25,7 @@ Certificates are read live on every request; the service keeps no history.
 | Method | Path                        | Description                                                                                       |
 |--------|-----------------------------|---------------------------------------------------------------------------------------------------|
 | GET    | `/inspect/{domain}`         | Connects to `https://{domain}` and returns the certificate chain. `{domain}` is validated.        |
+| GET    | `/inspect/{domain}/addresses` | Resolves the domain's A and AAAA records and returns the certificate chain from each address (see below). |
 | GET    | `/v1/domain/{hostname}/ssl` | SecurityTrails-compatible lookup of the domain's certificate (see below).                         |
 | GET    | `/v1/domain/{hostname}/tls` | Alias of `/v1/domain/{hostname}/ssl`; same response.                                              |
 | GET    | `/health`                   | Liveness probe; returns `OK`.                                                                     |
@@ -59,6 +61,41 @@ curl http://localhost:8001/inspect/example.com
 `ocspStaplingEnabled` is `true` when the server staples an OCSP response during the TLS handshake. It is also `false` when the check can't be completed. `ocspUrl` is the OCSP responder URL from the certificate's Authority Information Access extension, and is left out when the certificate has none (as with current Let's Encrypt certificates).
 
 Requests that fail domain validation return `400 Bad Request` with a plain-text message.
+
+### `/inspect/{domain}/addresses`
+
+`/inspect/{domain}` connects to whichever single address the OS resolver picks. When a domain is served from several addresses (load balancers, CDNs, dual-stack IPv4/IPv6), each one can present a different certificate, for example when one node wasn't updated after a renewal. This endpoint looks up the domain's A and AAAA records (following CNAMEs) and does a TLS handshake with every address on port 443, sending the domain as SNI so each server picks the certificate it would serve to a browser.
+
+```bash
+curl http://localhost:8001/inspect/example.com/addresses
+```
+
+```json
+{
+  "domain": "example.com",
+  "addresses": [
+    {
+      "address": "192.0.2.1",
+      "type": "A",
+      "ocspStaplingEnabled": false,
+      "certificates": [
+        {"subject": "CN=example.com,...", "issuer": "CN=...", "serialNumber": "...", "validFrom": "...", "validUntil": "...", "signatureAlgorithm": "SHA256withRSA", "version": 3}
+      ]
+    },
+    {
+      "address": "2001:db8::1",
+      "type": "AAAA",
+      "error": "Network is unreachable"
+    }
+  ]
+}
+```
+
+- IPv4 addresses come first, then IPv6, each in the order the DNS server returned them. IPv6 addresses are written in their short form.
+- `certificates` has the same fields as in `/inspect/{domain}`. `ocspStaplingEnabled` comes from the same handshake.
+- An address that can't be reached or fails the handshake is listed with an `error` instead of `certificates` and `ocspStaplingEnabled`; the other addresses are still returned. IPv6 addresses fail this way when the service itself has no IPv6 connectivity.
+- The handshakes run in parallel, each with a 5 second connect and read timeout.
+- `404 Not Found` when the domain has no A or AAAA records, `502 Bad Gateway` when a DNS lookup fails (rather than returning a partial list), and `400 Bad Request` for an invalid domain or an IP address. All error bodies are plain text.
 
 ### `/v1/domain/{hostname}/ssl` (SecurityTrails-compatible)
 
@@ -193,7 +230,7 @@ The settings above are translated at startup into the Spring Boot properties bel
 
 ## Observability
 
-Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Each request runs in its own span (`inspect` for `/inspect/{domain}`, `domain-ssl` for `/v1/domain/{hostname}/ssl` and `/tls`), and trace and span IDs are included in every log line. This README does not guarantee that spans are exported via OTLP by default; verify the runtime OpenTelemetry exporter configuration before relying on remote span export.
+Tracing is enabled via Micrometer Tracing with the OpenTelemetry bridge. Each request runs in its own span (`inspect` for `/inspect/{domain}`, `inspect-addresses` for `/inspect/{domain}/addresses` with an `inspect-address` child span per address, `domain-ssl` for `/v1/domain/{hostname}/ssl` and `/tls`), and trace and span IDs are included in every log line. This README does not guarantee that spans are exported via OTLP by default; verify the runtime OpenTelemetry exporter configuration before relying on remote span export.
 
 ## Container image
 
