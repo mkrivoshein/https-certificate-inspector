@@ -75,7 +75,7 @@ dependencyManagement {dm ->
 		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${ext.get('spring-cloud.version')}"
 	}
 	dependencies {
-		dependency 'dnsjava:dnsjava:3.6.5'
+		dependency 'dnsjava:dnsjava:3.7.0'
 		dependency "org.apache.commons:commons-text:${ext.get('commons-text.version')}"
 	}
 }
