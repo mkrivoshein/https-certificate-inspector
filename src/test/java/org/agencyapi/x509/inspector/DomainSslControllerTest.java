@@ -137,7 +137,8 @@ class DomainSslControllerTest {
                 .andExpect(jsonPath("$.meta.query.page").value("2"))
                 .andExpect(jsonPath("$.records", empty()));
 
-        verifyNoInteractions(domainResolver, certificateFetcher);
+        verifyNoInteractions(domainResolver);
+        verify(certificateFetcher, never()).fetchCertificate(any(InetAddress.class), any(), anyInt(), anyBoolean());
     }
 
     @Test
@@ -272,6 +273,18 @@ class DomainSslControllerTest {
         mockMvc.perform(get("/v1/domain/192.0.2.1/ssl"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("looks like an IP address")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/v1/domain/2001:db8::1/ssl", "/v1/domain/2001:db8::1/tls"})
+    void rejectsIpv6AddressesWithJsonMessage(String path) throws Exception {
+        // SecurityTrails' endpoint is domain-only; unlike /inspect, IP addresses are not inspected here
+        mockMvc.perform(get(path))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+
+        verifyNoInteractions(domainResolver);
+        verify(certificateFetcher, never()).fetchCertificate(any(InetAddress.class), any(), anyInt(), anyBoolean());
     }
 
     private void serve(InetAddress address, X509Certificate... chain) throws IOException {

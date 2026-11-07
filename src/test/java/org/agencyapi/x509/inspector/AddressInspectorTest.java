@@ -72,6 +72,32 @@ class AddressInspectorTest {
         verifyNoInteractions(domainResolver);
     }
 
+    @Test
+    void inspectsASingleAddressWithoutSni() throws Exception {
+        var address = address("2001:db8::1");
+        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.PORT, true))
+                .thenReturn(new CertificateFetcher.HandshakeResult(List.of(leaf()), false));
+
+        var result = inspector.inspect(address);
+
+        assertThat(result.address()).isEqualTo(address);
+        assertThat(result.reachable()).isTrue();
+        assertThat(result.handshake().certificates()).containsExactly(leaf());
+        verifyNoInteractions(domainResolver);
+    }
+
+    @Test
+    void reportsTheErrorOfASingleUnreachableAddress() throws Exception {
+        var address = address("192.0.2.1");
+        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.PORT, true))
+                .thenThrow(new ConnectException("Connection refused"));
+
+        var result = inspector.inspect(address);
+
+        assertThat(result.reachable()).isFalse();
+        assertThat(result.error()).hasMessage("Connection refused");
+    }
+
     private static InetAddress address(String address) {
         try {
             return InetAddress.getByName(address);

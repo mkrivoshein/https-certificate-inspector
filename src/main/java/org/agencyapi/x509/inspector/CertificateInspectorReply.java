@@ -9,7 +9,8 @@ import java.util.List;
 
 /**
  * Reply of {@code /inspect/{domain}}. {@code certificates} and {@code ocspStaplingEnabled} come from the first address
- * that completed a handshake; {@code addresses} has the result for every A and AAAA address of the domain.
+ * that completed a handshake; {@code addresses} has the result for every A and AAAA address of the domain, or the
+ * single address inspected when {@code domain} is an IP address.
  */
 public record CertificateInspectorReply(
         String domain,

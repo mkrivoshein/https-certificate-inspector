@@ -54,7 +54,8 @@ public class CertificateFetcher {
      * so each address a domain resolves to can be inspected. {@link HttpsURLConnection} sends no SNI when the URL host
      * is an IP address, which is why this opens the socket directly instead.
      * @param address The address to connect to
-     * @param domainName The domain name to send as SNI (e.g., "www.google.com")
+     * @param domainName The domain name to send as SNI (e.g., "www.google.com"), or {@code null} to send no SNI, so
+     *                   the server presents its default certificate
      * @param port The port to connect to (typically 443 for HTTPS)
      * @param trustAllCerts Whether to trust all certificates (use with caution)
      * @return the presented certificates and whether an OCSP response was stapled
@@ -63,8 +64,11 @@ public class CertificateFetcher {
     public HandshakeResult fetchCertificate(InetAddress address, String domainName, int port, boolean trustAllCerts)
             throws IOException {
         // SNI carries no root dot, so an absolute name such as "example.com." is sent as "example.com";
-        // names that cannot be sent as SNI are rejected before any connection is made
-        var serverName = new SNIHostName(domainName.endsWith(".") ? domainName.substring(0, domainName.length() - 1) : domainName);
+        // names that cannot be sent as SNI are rejected before any connection is made.
+        // An empty list explicitly turns SNI off, rather than leaving the JDK to derive a name from the address.
+        List<SNIServerName> serverNames = domainName == null
+                ? List.of()
+                : List.of(new SNIHostName(domainName.endsWith(".") ? domainName.substring(0, domainName.length() - 1) : domainName));
         SSLContext sslContext;
         try {
             sslContext = trustAllCerts ? trustAllContext() : SSLContext.getDefault();
@@ -74,7 +78,7 @@ public class CertificateFetcher {
 
         try (var sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket()) {
             var params = sslSocket.getSSLParameters();
-            params.setServerNames(List.of(serverName));
+            params.setServerNames(serverNames);
             sslSocket.setSSLParameters(params);
 
             sslSocket.connect(new InetSocketAddress(address, port), 5000);

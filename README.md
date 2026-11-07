@@ -2,7 +2,7 @@
 
 A small Spring Boot service that connects to an HTTPS endpoint, reads the X.509 certificates it presents, and returns key facts about them as JSON. It offers two APIs:
 
-- `/inspect/{domain}`: the full certificate chain, in this service's own format.
+- `/inspect/{domain}`: the full certificate chain, in this service's own format. Also takes an IP address, to see the certificate it serves by default.
 - `/v1/domain/{hostname}/ssl`: the domain's certificates in the same format as SecurityTrails' Get Domain SSL API, so SecurityTrails clients can switch to this service by changing their base URL.
 
 Certificates are read live on every request; the service keeps no history. Both APIs look up all of the domain's A and AAAA records and check the certificate on every address (see [Multiple addresses](#multiple-addresses)), so a load-balanced or dual-stack site whose nodes serve different certificates is caught.
@@ -23,7 +23,7 @@ Certificates are read live on every request; the service keeps no history. Both 
 
 | Method | Path                        | Description                                                                                       |
 |--------|-----------------------------|---------------------------------------------------------------------------------------------------|
-| GET    | `/inspect/{domain}`         | Returns the certificate chain presented by each of the domain's addresses. `{domain}` is validated. |
+| GET    | `/inspect/{domain}`         | Returns the certificate chain presented by each of the domain's addresses, or by an IP address without SNI. `{domain}` is validated. |
 | GET    | `/v1/domain/{hostname}/ssl` | SecurityTrails-compatible lookup of the domain's certificate (see below).                         |
 | GET    | `/v1/domain/{hostname}/tls` | Alias of `/v1/domain/{hostname}/ssl`; same response.                                              |
 | GET    | `/health`                   | Liveness probe; returns `OK`.                                                                     |
@@ -69,13 +69,27 @@ curl http://localhost:8001/inspect/example.com
 }
 ```
 
+- `{domain}` can also be an IPv4 or IPv6 address, e.g. `/inspect/192.0.2.1` or `/inspect/2001:db8::1` (see [Inspecting an IP address](#inspecting-an-ip-address)).
 - `addresses` has one entry per A and AAAA address. A reachable address has its own `certificates` and `ocspStaplingEnabled`; one that can't be reached or fails the handshake has an `error` instead, and the other addresses are still returned.
 - The top-level `certificates` and `ocspStaplingEnabled` are those of the first address that completed a handshake, so clients that only read them keep working.
 - `ocspStaplingEnabled` is `true` when the server staples an OCSP response during the TLS handshake. `ocspUrl` is the OCSP responder URL from the certificate's Authority Information Access extension, and is left out when the certificate has none (as with current Let's Encrypt certificates).
 - Errors are plain text:
-  - `400 Bad Request` for an invalid domain or an IP address;
+  - `400 Bad Request` for an invalid domain or IP address;
   - `404 Not Found` when the domain has no A or AAAA records;
-  - `502 Bad Gateway` when a DNS lookup fails or no address completes a handshake.
+  - `502 Bad Gateway` when a DNS lookup fails or no address completes a handshake (for an IP address, when it can't be reached or fails the handshake).
+
+#### Inspecting an IP address
+
+When `{domain}` is an IP address, the service does no DNS lookup and does a single TLS handshake with that address on port 443, **without SNI**. The server therefore presents its default certificate: the one a client that sends no host name gets, which is useful for checking what a server or load balancer serves by default.
+
+```bash
+curl http://localhost:8001/inspect/192.0.2.1
+curl http://localhost:8001/inspect/2001:db8::1
+```
+
+- The reply has the usual shape: `domain` is the address and `addresses` has a single entry (`type` is `A` for IPv4, `AAAA` for IPv6).
+- Write IPv6 addresses as they are, without brackets (`/inspect/2001:db8::1`, not `/inspect/[2001:db8::1]`). Any valid form is accepted, and `domain` and `address` are written in the short form, so `/inspect/2001:DB8:0:0:0:0:0:1` returns `"domain": "2001:db8::1"`. Addresses with a zone ID (`fe80::1%eth0`) are rejected.
+- The SecurityTrails-compatible endpoint below is domain-only, like SecurityTrails' own, and answers `400` for IP addresses.
 
 ### `/v1/domain/{hostname}/ssl` (SecurityTrails-compatible)
 
@@ -118,7 +132,7 @@ This service **keeps no history**: it does live TLS handshakes and only sees the
 | `include_subdomains` | Only `false` is supported; `true` returns `400`.                                                                 |
 | `page`               | Query parameter or JSON body. All records fit on page 1; later pages are empty.                                  |
 | `records`            | The distinct leaf certificates served by the domain's addresses that match `{hostname}` (including wildcards) and `status`. Unreachable addresses are skipped. |
-| Errors               | `400` for invalid input, `404` when the domain has no A or AAAA records, `502` when DNS fails or no address can be reached, `504` when every address timed out; all `{"message": ...}`. |
+| Errors               | `400` for invalid input or an IP address, `404` when the domain has no A or AAAA records, `502` when DNS fails or no address can be reached, `504` when every address timed out; all `{"message": ...}`. |
 
 ### Multiple addresses
 
