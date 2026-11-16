@@ -1,10 +1,13 @@
 package org.agencyapi.x509.inspector;
 
+import com.google.common.net.InetAddresses;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.KeyManagerFactory;
@@ -15,6 +18,7 @@ import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLSocket;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.file.Files;
@@ -124,6 +128,20 @@ class AddressHandshakeTest {
             var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
 
             assertThat(result.certificates()).hasSize(1);
+            assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
+            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"::ffff:127.0.0.1", "::ffff:7f00:1"})
+    void connectsOverIpv4WithoutSniForAnIpv4MappedIpv6Address(String literal) throws Exception {
+        // parsed the way the controller parses it; the server only listens on IPv4, so a handshake proves the family
+        var address = InetAddresses.forString(literal);
+        try (var server = startServer(InetAddress.getByName("127.0.0.1"))) {
+            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+
+            assertThat(address).isInstanceOf(Inet4Address.class);
             assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
             assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
         }

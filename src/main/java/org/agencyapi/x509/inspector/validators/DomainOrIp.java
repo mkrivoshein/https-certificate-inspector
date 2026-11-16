@@ -24,8 +24,10 @@ public @interface DomainOrIp {
 
         @Override
         public boolean isValid(String value, ConstraintValidatorContext context) {
-            // a zone ID (e.g. fe80::1%eth0) names an interface of this service's host, which is never what's meant
-            return domain.isValid(value, context) || InetAddresses.isInetAddress(value) && !value.contains("%");
+            // a zone ID (e.g. fe80::1%eth0) names an interface of this service's host, which is never what's meant;
+            // checked first, as a zoned literal with a dot (::ffff:192.0.2.1%eth0) would otherwise pass as a domain,
+            // and no domain name contains '%'
+            return !value.contains("%") && (domain.isValid(value, context) || InetAddresses.isInetAddress(value));
         }
     }
 }
