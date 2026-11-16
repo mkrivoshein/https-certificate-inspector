@@ -23,7 +23,7 @@ All Java sources live under `src/main/java/org/agencyapi/x509/inspector/`:
 | `src/main/resources/application.yml` | Port `8001`, OTLP endpoint, log pattern with `traceId`/`spanId`. |
 | `src/main/resources/META-INF/spring.factories` | Registers `ConditionalTlsEnvironmentPostProcessor`. |
 
-Tests live under `src/test/` and use JUnit 5 + AssertJ (via `spring-boot-starter-test`); public fixture certificates for the inspection endpoints are in `src/test/resources/certificates/`.
+Tests live under `src/test/` and use JUnit 5 + AssertJ (via `spring-boot-starter-test`); public fixture certificates for the inspection endpoints are in `src/test/resources/certificates/`. `LocalTlsServer` is a local TLS server that records the SNI each handshake sent; `InspectIpAddressEndToEndTest` runs the app on a random port with `inspector.handshake-port` pointed at it, and keeps the startup check of `https://agencyapi.org` off the network with a `@Primary` test fetcher.
 
 ## HTTP, HTTPS, and mTLS
 

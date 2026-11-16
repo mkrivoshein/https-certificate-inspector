@@ -1,7 +1,6 @@
 package org.agencyapi.x509.inspector;
 
 import com.google.common.net.InetAddresses;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -9,26 +8,13 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import javax.net.ssl.ExtendedSSLSession;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLHandshakeException;
-import javax.net.ssl.SSLServerSocket;
-import javax.net.ssl.SSLSocket;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyStore;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -47,47 +33,31 @@ class AddressHandshakeTest {
     static Path directory;
 
     private static SSLContext serverContext;
-    private static final ExecutorService acceptors = Executors.newCachedThreadPool();
-    // the SNI host names each accepted handshake requested, "" when the client sent none
-    private static final BlockingQueue<String> requestedServerNames = new LinkedBlockingQueue<>();
 
     private final CertificateFetcher fetcher = new CertificateFetcher();
 
     @BeforeAll
     static void createServerContext() throws Exception {
-        Keytool.genKeyPair(directory, "server.p12", "server", "CN=" + DOMAIN, "-ext", "san=dns:" + DOMAIN);
-        var keyStore = KeyStore.getInstance("PKCS12");
-        try (InputStream in = Files.newInputStream(directory.resolve("server.p12"))) {
-            keyStore.load(in, Keytool.PASSWORD.toCharArray());
-        }
-        var keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        keyManagers.init(keyStore, Keytool.PASSWORD.toCharArray());
-        serverContext = SSLContext.getInstance("TLS");
-        serverContext.init(keyManagers.getKeyManagers(), null, null);
-    }
-
-    @AfterAll
-    static void stopServers() {
-        acceptors.shutdownNow();
+        serverContext = LocalTlsServer.serverContext(directory, DOMAIN);
     }
 
     @Test
     void sendsDomainAsSniWhenConnectingByIpv4Address() throws Exception {
         var address = InetAddress.getByName("127.0.0.1");
         try (var server = startServer(address)) {
-            var result = fetcher.fetchCertificate(address, DOMAIN, server.getLocalPort(), true);
+            var result = fetcher.fetchCertificate(address, DOMAIN, server.port(), true);
 
             assertThat(result.certificates()).hasSize(1);
             assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
             assertThat(result.ocspStapled()).isFalse();
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEqualTo(DOMAIN);
+            assertThat(server.nextRequestedServerName()).isEqualTo(DOMAIN);
         }
     }
 
     @Test
     void sendsDomainAsSniWhenConnectingByIpv6Address() throws Exception {
         var address = InetAddress.getByName("::1");
-        ServerSocket server;
+        LocalTlsServer server;
         try {
             server = startServer(address);
         } catch (IOException e) {
@@ -95,10 +65,10 @@ class AddressHandshakeTest {
             return;
         }
         try (server) {
-            var result = fetcher.fetchCertificate(address, DOMAIN, server.getLocalPort(), true);
+            var result = fetcher.fetchCertificate(address, DOMAIN, server.port(), true);
 
             assertThat(result.certificates()).hasSize(1);
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEqualTo(DOMAIN);
+            assertThat(server.nextRequestedServerName()).isEqualTo(DOMAIN);
         }
     }
 
@@ -106,18 +76,18 @@ class AddressHandshakeTest {
     void sendsNoSniAndReturnsTheDefaultCertificateWhenInspectingIpv4Address() throws Exception {
         var address = InetAddress.getByName("127.0.0.1");
         try (var server = startServer(address)) {
-            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+            var result = fetcher.fetchCertificate(address, null, server.port(), true);
 
             assertThat(result.certificates()).hasSize(1);
             assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.nextRequestedServerName()).isEmpty();
         }
     }
 
     @Test
     void sendsNoSniAndReturnsTheDefaultCertificateWhenInspectingIpv6Address() throws Exception {
         var address = InetAddress.getByName("::1");
-        ServerSocket server;
+        LocalTlsServer server;
         try {
             server = startServer(address);
         } catch (IOException e) {
@@ -125,11 +95,11 @@ class AddressHandshakeTest {
             return;
         }
         try (server) {
-            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+            var result = fetcher.fetchCertificate(address, null, server.port(), true);
 
             assertThat(result.certificates()).hasSize(1);
             assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.nextRequestedServerName()).isEmpty();
         }
     }
 
@@ -139,11 +109,11 @@ class AddressHandshakeTest {
         // parsed the way the controller parses it; the server only listens on IPv4, so a handshake proves the family
         var address = InetAddresses.forString(literal);
         try (var server = startServer(InetAddress.getByName("127.0.0.1"))) {
-            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+            var result = fetcher.fetchCertificate(address, null, server.port(), true);
 
             assertThat(address).isInstanceOf(Inet4Address.class);
             assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.nextRequestedServerName()).isEmpty();
         }
     }
 
@@ -152,9 +122,9 @@ class AddressHandshakeTest {
         // an address resolved from a name remembers it; without SNI turned off explicitly the JDK would send it
         var address = InetAddress.getByAddress(DOMAIN, new byte[]{127, 0, 0, 1});
         try (var server = startServer(address)) {
-            fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+            fetcher.fetchCertificate(address, null, server.port(), true);
 
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.nextRequestedServerName()).isEmpty();
         }
     }
 
@@ -162,9 +132,9 @@ class AddressHandshakeTest {
     void sendsAbsoluteDomainWithoutTheRootDotAsSni() throws Exception {
         var address = InetAddress.getByName("127.0.0.1");
         try (var server = startServer(address)) {
-            fetcher.fetchCertificate(address, DOMAIN + ".", server.getLocalPort(), true);
+            fetcher.fetchCertificate(address, DOMAIN + ".", server.port(), true);
 
-            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEqualTo(DOMAIN);
+            assertThat(server.nextRequestedServerName()).isEqualTo(DOMAIN);
         }
     }
 
@@ -172,7 +142,7 @@ class AddressHandshakeTest {
     void failsHandshakeWithUntrustedCertificateUnlessTrustingAll() throws Exception {
         var address = InetAddress.getByName("127.0.0.1");
         try (var server = startServer(address)) {
-            assertThatThrownBy(() -> fetcher.fetchCertificate(address, DOMAIN, server.getLocalPort(), false))
+            assertThatThrownBy(() -> fetcher.fetchCertificate(address, DOMAIN, server.port(), false))
                     .isInstanceOf(SSLHandshakeException.class);
         }
     }
@@ -193,24 +163,7 @@ class AddressHandshakeTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    private static SSLServerSocket startServer(InetAddress address) throws IOException {
-        var server = (SSLServerSocket) serverContext.getServerSocketFactory().createServerSocket(0, 50, address);
-        requestedServerNames.clear();
-        acceptors.submit(() -> {
-            while (!server.isClosed()) {
-                try (var socket = (SSLSocket) server.accept()) {
-                    socket.startHandshake();
-                    var names = ((ExtendedSSLSession) socket.getSession()).getRequestedServerNames();
-                    requestedServerNames.add(names.stream()
-                            .filter(SNIHostName.class::isInstance)
-                            .map(name -> ((SNIHostName) name).getAsciiName())
-                            .findFirst()
-                            .orElse(""));
-                } catch (IOException _) {
-                    // the client closing mid-handshake, or the server socket closing, is expected here
-                }
-            }
-        });
-        return server;
+    private static LocalTlsServer startServer(InetAddress address) throws IOException {
+        return LocalTlsServer.start(serverContext, address, 0);
     }
 }
