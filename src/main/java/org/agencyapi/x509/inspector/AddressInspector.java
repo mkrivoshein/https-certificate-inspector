@@ -5,6 +5,7 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -27,19 +28,26 @@ import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
 public class AddressInspector {
     private static final Logger logger = LoggerFactory.getLogger(AddressInspector.class);
 
-    static final int PORT = 443;
+    static final int DEFAULT_PORT = 443;
     // caps the address handshakes in flight across all requests; further addresses wait for a free slot
     static final int MAX_CONCURRENT_HANDSHAKES = 32;
 
     private final Tracer tracer;
     private final DomainResolver domainResolver;
     private final CertificateFetcher certificateFetcher;
+    private final int port;
     private final Semaphore handshakeSlots = new Semaphore(MAX_CONCURRENT_HANDSHAKES);
 
-    public AddressInspector(Tracer tracer, DomainResolver domainResolver, CertificateFetcher certificateFetcher) {
+    /**
+     * @param port the port every handshake connects to; only changed from {@value #DEFAULT_PORT} to test against a local
+     *             TLS server
+     */
+    public AddressInspector(Tracer tracer, DomainResolver domainResolver, CertificateFetcher certificateFetcher,
+                            @Value("${inspector.handshake-port:" + DEFAULT_PORT + "}") int port) {
         this.tracer = tracer;
         this.domainResolver = domainResolver;
         this.certificateFetcher = certificateFetcher;
+        this.port = port;
     }
 
     /**
@@ -90,7 +98,7 @@ public class AddressInspector {
         try (var withSpan = tracer.withSpan(span.start())) {
             handshakeSlots.acquire();
             try {
-                return new AddressResult(address, certificateFetcher.fetchCertificate(address, domain, PORT, true), null);
+                return new AddressResult(address, certificateFetcher.fetchCertificate(address, domain, port, true), null);
             } finally {
                 handshakeSlots.release();
             }
