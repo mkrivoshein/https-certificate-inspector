@@ -223,9 +223,11 @@ class CertificateInspectorControllerTest {
         verifyNoInteractions(domainResolver);
     }
 
-    @Test
-    void inspectsAnIpv4MappedIpv6AddressAsIpv4() throws Exception {
-        mockMvc.perform(get("/inspect/::ffff:192.0.2.1"))
+    @ParameterizedTest
+    @ValueSource(strings = {"::ffff:192.0.2.1", "::ffff:c000:201", "::FFFF:C000:0201", "0:0:0:0:0:ffff:c000:201"})
+    void inspectsAnIpv4MappedIpv6AddressAsIpv4(String address) throws Exception {
+        // dotted and hexadecimal forms of the same mapped address all name the IPv4 address 192.0.2.1
+        mockMvc.perform(get("/inspect/" + address))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.domain").value("192.0.2.1"))
                 .andExpect(jsonPath("$.addresses", hasSize(1)))
@@ -246,12 +248,14 @@ class CertificateInspectorControllerTest {
                 .andExpect(content().string(containsString("192.0.2.1: Connection refused")));
     }
 
-    @Test
-    void rejectsIpv6AddressesWithAZoneId() throws Exception {
-        mockMvc.perform(get("/inspect/fe80::1%25eth0"))
+    @ParameterizedTest
+    @ValueSource(strings = {"fe80::1%25eth0", "::ffff:192.0.2.1%25eth0"})
+    void rejectsIpv6AddressesWithAZoneId(String address) throws Exception {
+        mockMvc.perform(get("/inspect/" + address))
                 .andExpect(status().isBadRequest());
 
         verify(certificateFetcher, never()).fetchCertificate(any(InetAddress.class), any(), anyInt(), anyBoolean());
+        verifyNoInteractions(domainResolver);
     }
 
     @Test
