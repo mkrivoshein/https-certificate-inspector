@@ -21,6 +21,7 @@ import static org.agencyapi.x509.inspector.IpUtils.isValidIpAddress;
  * Resolves a domain's A and AAAA records and does a TLS handshake with every address, sending the domain as SNI, so
  * a server that presents a different certificate on one of its addresses is not missed. The handshakes run in
  * parallel; an address that can't be reached is reported with its error instead of failing the whole inspection.
+ * A single IP address can also be inspected without SNI, to see the certificate it serves by default.
  */
 @Component
 public class AddressInspector {
@@ -71,6 +72,17 @@ public class AddressInspector {
         }
     }
 
+    /**
+     * Does a TLS handshake with {@code address} without sending SNI, so the server presents its default certificate.
+     * @return the result for that address; a failed handshake is reported in it rather than thrown
+     */
+    public AddressResult inspect(InetAddress address) {
+        return inspectAddress(tracer.currentSpan(), null, address);
+    }
+
+    /**
+     * @param domain the name to send as SNI, or {@code null} to send none
+     */
     private AddressResult inspectAddress(Span parent, String domain, InetAddress address) {
         var span = (parent != null ? tracer.nextSpan(parent) : tracer.nextSpan())
                 .name("inspect-address")
@@ -86,7 +98,8 @@ public class AddressInspector {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while waiting to inspect " + InetAddresses.toAddrString(address), e);
         } catch (IOException e) {
-            logger.info("Unable to inspect {} at {}: {}", domain, InetAddresses.toAddrString(address), e.toString());
+            logger.info("Unable to inspect {} at {}: {}", domain != null ? domain : "default certificate",
+                    InetAddresses.toAddrString(address), e.toString());
             span.error(e);
             return new AddressResult(address, null, e);
         } finally {

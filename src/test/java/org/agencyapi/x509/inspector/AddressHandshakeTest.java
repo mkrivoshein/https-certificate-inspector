@@ -32,7 +32,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Exercises {@link CertificateFetcher#fetchCertificate(InetAddress, String, int, boolean)} against local TLS servers on
- * the IPv4 and IPv6 loopback addresses, checking that the domain is sent as SNI even though the connection is by IP.
+ * the IPv4 and IPv6 loopback addresses, checking that the domain is sent as SNI even though the connection is by IP,
+ * and that no SNI at all is sent when there is no domain.
  */
 @Timeout(30)
 class AddressHandshakeTest {
@@ -94,6 +95,48 @@ class AddressHandshakeTest {
 
             assertThat(result.certificates()).hasSize(1);
             assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEqualTo(DOMAIN);
+        }
+    }
+
+    @Test
+    void sendsNoSniAndReturnsTheDefaultCertificateWhenInspectingIpv4Address() throws Exception {
+        var address = InetAddress.getByName("127.0.0.1");
+        try (var server = startServer(address)) {
+            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+
+            assertThat(result.certificates()).hasSize(1);
+            assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
+            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+        }
+    }
+
+    @Test
+    void sendsNoSniAndReturnsTheDefaultCertificateWhenInspectingIpv6Address() throws Exception {
+        var address = InetAddress.getByName("::1");
+        ServerSocket server;
+        try {
+            server = startServer(address);
+        } catch (IOException e) {
+            assumeTrue(false, "IPv6 loopback is not available: " + e.getMessage());
+            return;
+        }
+        try (server) {
+            var result = fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+
+            assertThat(result.certificates()).hasSize(1);
+            assertThat(result.certificates().getFirst().getSubjectX500Principal().getName()).isEqualTo("CN=" + DOMAIN);
+            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
+        }
+    }
+
+    @Test
+    void sendsNoSniForAnAddressThatCarriesAHostName() throws Exception {
+        // an address resolved from a name remembers it; without SNI turned off explicitly the JDK would send it
+        var address = InetAddress.getByAddress(DOMAIN, new byte[]{127, 0, 0, 1});
+        try (var server = startServer(address)) {
+            fetcher.fetchCertificate(address, null, server.getLocalPort(), true);
+
+            assertThat(requestedServerNames.poll(5, TimeUnit.SECONDS)).isEmpty();
         }
     }
 
