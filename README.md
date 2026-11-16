@@ -88,7 +88,7 @@ curl http://localhost:8001/inspect/2001:db8::1
 ```
 
 - The reply has the usual shape: `domain` is the address and `addresses` has a single entry (`type` is `A` for IPv4, `AAAA` for IPv6).
-- Write IPv6 addresses as they are, without brackets (`/inspect/2001:db8::1`, not `/inspect/[2001:db8::1]`). Any valid form is accepted, and `domain` and `address` are written in the short form, so `/inspect/2001:DB8:0:0:0:0:0:1` returns `"domain": "2001:db8::1"`. Addresses with a zone ID (`fe80::1%eth0`) are rejected.
+- Write IPv6 addresses as they are, without brackets (`/inspect/2001:db8::1`, not `/inspect/[2001:db8::1]`). Any valid form is accepted, and `domain` and `address` are written in the short form, so `/inspect/2001:DB8:0:0:0:0:0:1` returns `"domain": "2001:db8::1"`. An IPv4-mapped IPv6 address is inspected as the IPv4 address it maps, so `/inspect/::ffff:192.0.2.1` returns `"domain": "192.0.2.1"` with `type` `A`. Addresses with a zone ID (`fe80::1%eth0`) are rejected.
 - The SecurityTrails-compatible endpoint below is domain-only, like SecurityTrails' own, and answers `400` for IP addresses.
 
 ### `/v1/domain/{hostname}/ssl` (SecurityTrails-compatible)

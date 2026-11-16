@@ -224,6 +224,19 @@ class CertificateInspectorControllerTest {
     }
 
     @Test
+    void inspectsAnIpv4MappedIpv6AddressAsIpv4() throws Exception {
+        mockMvc.perform(get("/inspect/::ffff:192.0.2.1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain").value("192.0.2.1"))
+                .andExpect(jsonPath("$.addresses", hasSize(1)))
+                .andExpect(jsonPath("$.addresses[0].address").value("192.0.2.1"))
+                .andExpect(jsonPath("$.addresses[0].type").value("A"));
+
+        verify(certificateFetcher).fetchCertificate(IPV4, null, 443, true);
+        verifyNoInteractions(domainResolver);
+    }
+
+    @Test
     void returnsBadGatewayWhenTheIpAddressIsUnreachable() throws Exception {
         when(certificateFetcher.fetchCertificate(eq(IPV4), any(), anyInt(), anyBoolean()))
                 .thenThrow(new ConnectException("Connection refused"));
