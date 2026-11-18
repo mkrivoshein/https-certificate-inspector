@@ -112,6 +112,10 @@ jib {
 	}
 	container {
 		mainClass = "org.agencyapi.x509.inspector.CertificateInspector"
+		// Interim mitigation for CVE-2026-114938 ("Java4Shell"): memory corruption in the
+		// AVX-512 VBMI java.util.Base64 decoder intrinsic. No fixed BellSoft Liberica 25 build
+		// (25.0.5.1) is published yet; drop this flag once the base image ships it.
+		jvmFlags = ['-XX:-UseBASE64Intrinsics']
 		ports = ['8001']
 		format = 'OCI'
 
