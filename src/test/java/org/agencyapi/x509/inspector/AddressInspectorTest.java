@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 class AddressInspectorTest {
     private final DomainResolver domainResolver = mock(DomainResolver.class);
     private final CertificateFetcher certificateFetcher = mock(CertificateFetcher.class);
-    private final AddressInspector inspector = new AddressInspector(Tracer.NOOP, domainResolver, certificateFetcher);
+    private final AddressInspector inspector = new AddressInspector(Tracer.NOOP, domainResolver, certificateFetcher, AddressInspector.DEFAULT_PORT);
 
     @Test
     void returnsOneResultPerAddressInResolverOrder() throws Exception {
@@ -75,7 +75,7 @@ class AddressInspectorTest {
     @Test
     void inspectsASingleAddressWithoutSni() throws Exception {
         var address = address("2001:db8::1");
-        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.PORT, true))
+        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.DEFAULT_PORT, true))
                 .thenReturn(new CertificateFetcher.HandshakeResult(List.of(leaf()), false));
 
         var result = inspector.inspect(address);
@@ -89,13 +89,23 @@ class AddressInspectorTest {
     @Test
     void reportsTheErrorOfASingleUnreachableAddress() throws Exception {
         var address = address("192.0.2.1");
-        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.PORT, true))
+        when(certificateFetcher.fetchCertificate(address, null, AddressInspector.DEFAULT_PORT, true))
                 .thenThrow(new ConnectException("Connection refused"));
 
         var result = inspector.inspect(address);
 
         assertThat(result.reachable()).isFalse();
         assertThat(result.error()).hasMessage("Connection refused");
+    }
+
+    @Test
+    void connectsToTheConfiguredPort() throws Exception {
+        var address = address("192.0.2.1");
+        var onOtherPort = new AddressInspector(Tracer.NOOP, domainResolver, certificateFetcher, 8443);
+        when(certificateFetcher.fetchCertificate(address, null, 8443, true))
+                .thenReturn(new CertificateFetcher.HandshakeResult(List.of(leaf()), false));
+
+        assertThat(onOtherPort.inspect(address).reachable()).isTrue();
     }
 
     private static InetAddress address(String address) {

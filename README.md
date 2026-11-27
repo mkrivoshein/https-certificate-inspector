@@ -141,6 +141,7 @@ A domain served from several addresses (load balancers, CDNs, dual-stack IPv4/IP
 - IPv4 addresses come first, then IPv6, each in the order the DNS server returned them. IPv6 addresses are written in their short form.
 - When the DNS client can't resolve the name (a failed lookup, or no records), the OS resolver is tried too, which also finds names that only exist in `/etc/hosts` or behind a search domain. Its answer is used as is, IPv4 first. A failed DNS lookup is never taken as a partial list of addresses.
 - IPv6 addresses fail with an error when the service itself has no IPv6 connectivity.
+- Handshakes always go to port 443. The `inspector.handshake-port` property changes that port; it exists so tests can point the service at a local TLS server, not for production use.
 - The handshakes run in parallel, each with a 5 second connect and read timeout. At most 32 handshakes run at once across all requests; further addresses wait for a free slot.
 
 ## HTTPS and mTLS
